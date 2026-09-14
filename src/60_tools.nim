@@ -720,9 +720,12 @@ proc registerLegacyTools() =
       except CatchableError as e:
         return ToolResult(ok: false, payload: %*{"url": url}, receipt: "", message: e.msg))
 
+proc registerImageTools()
+
 proc initTools() =
   registerTools()
   registerLegacyTools()
+  registerImageTools()
 
 proc registerReasonTool() =
   registerTool("reason", "Run a recursive specialist reasoning pass and return its structured result.", %*{"goal": "string", "context": "string optional", "depth": "int optional", "max_depth": "int optional", "branches": "int optional"},
@@ -740,4 +743,37 @@ proc registerReasonTool() =
         return ToolResult(ok: true, payload: resultNode, receipt: "reason:" & sha1Hex(goal & ":" & canonical(resultNode)), message: "reasoning completed")
       except CatchableError as e:
         return ToolResult(ok: false, payload: %*{"goal": goal}, receipt: "", message: e.msg))
+
+proc registerImageTools() =
+  registerTool("image_generate", "Generate real raster images through FlyMyAI and persist them as task artifacts. Safe requests are directed by gemini38 to the GPT Image model and adult requests are directed by grok43 to the Seedream model. Supply prompt or an images array containing request objects. Each generated file is persisted and returned with its image identifier, artifact identifier, path, URL, byte count and checksum.", %*{
+    "prompt": "string optional",
+    "adult": "bool optional",
+    "policy": "safe|adult optional",
+    "size": "string optional",
+    "quality": "auto|low|medium|high|xhigh|max optional",
+    "moderation": "auto|low optional",
+    "watermark": "bool optional",
+    "sequential_image_generation": "auto|disabled optional",
+    "optimize_prompt_mode": "standard|fast optional",
+    "name": "string optional",
+    "reference_images": "string[] optional",
+    "images": "array optional"
+  },
+    proc(h: TaskHandle, args: JsonNode): Future[ToolResult] {.async.} =
+      return await runImageGenerationTool(h, args, false))
+
+  registerTool("image_edit", "Edit existing images through FlyMyAI with enforced director routing. Safe edits use gemini38 and one reference image. Adult edits use grok43 and the Seedream model with up to fourteen reference slots. reference_images is required.", %*{
+    "prompt": "string",
+    "reference_images": "string[]",
+    "policy": "safe|adult optional",
+    "size": "string optional",
+    "quality": "auto|low|medium|high|xhigh|max optional",
+    "moderation": "auto|low optional",
+    "watermark": "bool optional",
+    "sequential_image_generation": "auto|disabled optional",
+    "optimize_prompt_mode": "standard|fast optional",
+    "name": "string optional"
+  },
+    proc(h: TaskHandle, args: JsonNode): Future[ToolResult] {.async.} =
+      return await runImageGenerationTool(h, args, true))
 

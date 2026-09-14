@@ -175,7 +175,8 @@ type
   ProviderKind = enum
     pkRequesty,
     pkCerebras,
-    pkGemini
+    pkGemini,
+    pkFlyMyAi
   ModelRole = enum
     mrOrchestrator,
     mrGpt6Astra,
@@ -191,6 +192,9 @@ type
     osReflect,
     osConsolidate,
     osTerminal
+  ImageContentPolicy = enum
+    icpSafe,
+    icpAdult
   ModelSpec = object
     role: ModelRole
     provider: ProviderKind
@@ -238,6 +242,7 @@ type
     requiresDesktop: bool
     requiresVisualAnalysis: bool
     requiresDocumentAnalysis: bool
+    requiresImageGeneration: bool
     plan: JsonNode
     delegations: JsonNode
     completionCriteria: JsonNode
@@ -306,6 +311,50 @@ type
     loopActive: Atomic[bool]
     lock: Lock
     rootTask: TaskHandle
+  FlyMyAiError = object of CatchableError
+    status: int
+  FlyMyAiFileField = object
+    name: string
+    filename: string
+    mimeType: string
+    data: string
+  FlyMyAiPrediction = object
+    status: int
+    model: string
+    outputData: JsonNode
+    inferenceTime: float
+    raw: JsonNode
+  ImageReference = object
+    source: string
+    filename: string
+    mimeType: string
+    data: string
+    bytes: int
+  ImageGenerationRequest = object
+    prompt: string
+    policy: ImageContentPolicy
+    size: string
+    quality: string
+    moderation: string
+    watermark: bool
+    sequential: string
+    optimizePromptMode: string
+    name: string
+    references: seq[ImageReference]
+    directorModel: string
+    directorAgentId: string
+    stepId: string
+    directorEnforced: bool
+  ImageGenerationResult = object
+    ok: bool
+    imageId: string
+    model: string
+    policy: ImageContentPolicy
+    directorModel: string
+    payload: JsonNode
+    receipt: string
+    message: string
+    latencyMs: int
   ToolHandler = proc(h: TaskHandle, args: JsonNode): Future[ToolResult] {.closure.}
   GcsafeToolHandler = proc(tenant: string, args: JsonNode): Future[ToolResult] {.closure, gcsafe.}
   GcsafeRequestHandler = proc(req: Request): Future[void] {.closure, gcsafe.}

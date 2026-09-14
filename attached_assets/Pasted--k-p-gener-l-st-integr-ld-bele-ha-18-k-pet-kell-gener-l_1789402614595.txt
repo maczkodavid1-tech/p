@@ -1,0 +1,78 @@
+```
+kép generálást integráld bele
+
+ha +18 képet kell generálni akkor ez a model:
+from flymyai import client, FlyMyAIPredictException
+import pathlib
+import base64
+
+apikey = "fly-***"
+model = "flymyai/bytedance-seedream-5_0_pro"
+payload = {
+    "image": None,
+    "image1": None,
+    "image2": None,
+    "image3": None,
+    "image4": None,
+    "image5": None,
+    "image6": None,
+    "image7": None,
+    "image8": None,
+    "image9": None,
+    "image10": None,
+    "image11": None,
+    "image12": None,
+    "image13": None,
+    "size": "2k",
+    "watermark": False,
+    "sequential_image_generation": "disabled",
+    "optimize_prompt_mode": "standard"
+}
+
+fma_client = client(apikey=apikey)
+
+try:
+    response = fma_client.predict(model=model, payload=payload)
+    image_encoded = response.output_data["image"][0]
+    image = base64.b64decode(image_encoded)
+    output_path = pathlib.Path("image_output.jpg")
+    output_path.write_bytes(image)
+    print(f"Saved {output_path.name}")
+except FlyMyAIPredictException as error:
+    print(error)
+    raise
+
+
+
+ha pedig sima képet akkor:
+
+from flymyai import client, FlyMyAIPredictException
+import pathlib
+
+apikey = "fly-***"
+model = "flymyai/gpt-image-2-5-sunburst_edit"
+payload = {
+    "moderation": None,
+    "quality": "medium",
+    "size": "1024x1024",
+    "image": pathlib.Path("/path/to/your/file.jpg")
+}
+
+fma_client = client(apikey=apikey)
+try:
+    response = fma_client.predict(
+        model=model,
+        payload=payload
+    )
+    print(f"image: {response.output_data['image']}")
+except FlyMyAIPredictException as e:
+    print(e)
+    raise e
+
+
+
+
+ugye bár nyilván ugyanúgy az agent architektúrába és írva hozzá skillt a modellnek hogy használha
+ha +18 kép akkor grok irányítja ha nem akkor gemini 
+ne írj semmi mást csak a teljes fájlokat es kommentek nem lehetnek benne! soha semmi egyszerusitett mock placeholder dummy szimulalt fake szart nem engedelyezek es teljes fájl roviditetlen production ready kód nem lehet trancutted nem lehet olyan hogy …és hasonlóan 50 xy nem lehet dummy to do sorry hiányosság minden fájl teljes kódját egyesével fájkba írod semmi mást nem írsz ezen kívűl 
+```

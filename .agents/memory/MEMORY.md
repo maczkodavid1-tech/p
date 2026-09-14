@@ -1,2 +1,3 @@
 - [Nim runtime startup](nim-runtime-startup.md) — this service needs SQLite available and Nim threads disabled in the preview workflow.
 - [Gemini Interactions input](gemini-interactions-input.md) — Gemini conversation inputs must use typed user/model steps with nested content parts.
+- [FlyMyAI image generation](flymyai-image-generation.md) — configure the host-root base URL; the client appends the versioned prediction path.

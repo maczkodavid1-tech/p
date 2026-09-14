@@ -522,6 +522,7 @@ proc routeDecisionFromJson(node: JsonNode): RouteDecision =
   result.requiresDesktop = node{"requires_desktop"}.getBool(false)
   result.requiresVisualAnalysis = node{"requires_visual_analysis"}.getBool(false)
   result.requiresDocumentAnalysis = node{"requires_document_analysis"}.getBool(false)
+  result.requiresImageGeneration = node{"requires_image_generation"}.getBool(false)
   result.plan = newJArray()
   if node.hasKey("plan"):
     if node["plan"].kind != JArray:
@@ -545,7 +546,7 @@ proc routeDecisionFromJson(node: JsonNode): RouteDecision =
       result.delegations.add(normalized)
   result.completionCriteria = if node.hasKey("completion_criteria") and node["completion_criteria"].kind == JArray: copy(node["completion_criteria"]) else: newJArray()
   validatePlanGraph(result.plan)
-  let executionRequired = result.requiresVm or result.requiresBrowser or result.requiresDesktop or result.requiresVisualAnalysis or result.requiresDocumentAnalysis or result.delegations.elems.len > 0
+  let executionRequired = result.requiresVm or result.requiresBrowser or result.requiresDesktop or result.requiresVisualAnalysis or result.requiresDocumentAnalysis or result.requiresImageGeneration or result.delegations.elems.len > 0
   if executionRequired and result.plan.elems.len == 0:
     raise newException(ValueError, "execution routes must contain at least one explicit plan step")
   if result.plan.elems.len > 0 and result.completionCriteria.elems.len == 0:
@@ -559,7 +560,7 @@ proc routeDecisionFromJson(node: JsonNode): RouteDecision =
   result.raw["delegations"] = copy(result.delegations)
 
 proc routeTask(goal: string, sigma: JsonNode, obs: JsonNode, tenantId = "", taskId = ""): Future[RouteDecision] {.async.} =
-  let systemText = promptText("orchestrator_router")
+  let systemText = promptText("orchestrator_router") & "\n\n" & promptText("image_generation")
   let baseUserText = "GOAL:\n" & goal & "\n\nCURRENT STATE:\n" & canonical(sigma) & "\n\nLATEST OBSERVATION:\n" & canonical(obs) & "\n\nAVAILABLE REAL TOOLS:\n" & canonical(toolCatalog()) & "\n\nAVAILABLE MODEL REFERENCE SKILLS:\n" & referenceSkillCatalog() & "\n\nVALID SPECIALIST MODEL ROLE IDS:\n" & configuredModelRoleNames().join(", ") & "\n\nVALID SUBAGENT MODEL ROLE IDS:\n" & configuredSubAgentModelRoleNames().join(", ")
   var messages = %*[
     {"role": "system", "content": systemText},

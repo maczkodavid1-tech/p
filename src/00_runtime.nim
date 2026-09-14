@@ -10,11 +10,20 @@ const
   DefaultCerebrasBaseUrl = "https://api.cerebras.ai/v1"
   DefaultGeminiBaseUrl = "https://generativelanguage.googleapis.com/v1"
   DefaultInstaVmBaseUrl = "https://api.instavm.io"
+  DefaultFlyMyAiBaseUrl = "https://api.flymy.ai"
   Gpt6AstraModel = "openai/gpt-6-astra:flex"
   Glm52Model = "zai/glm-5.2"
   Gemini38Model = "gemini-3.8-flash"
   MiniMaxM3Model = "minimaxi/minimax-m3"
   Grok43Model = "grok-4.3"
+  Seedream5ProImageModel = "flymyai/bytedance-seedream-5_0_pro"
+  GptImage25SunburstEditModel = "flymyai/gpt-image-2-5-sunburst_edit"
+  SeedreamReferenceSlots = 14
+  DefaultAdultImageSize = "2k"
+  DefaultSafeImageSize = "1024x1024"
+  DefaultSafeImageQuality = "medium"
+  DefaultSequentialImageGeneration = "disabled"
+  DefaultOptimizePromptMode = "standard"
   System1HzInterval = 50
   System2HzInterval = 1000
   DbBusyTimeoutMs = 15000
@@ -33,6 +42,9 @@ var
   CerebrasBaseUrl {.threadvar.}: string
   GeminiBaseUrl {.threadvar.}: string
   InstaVmBaseUrl {.threadvar.}: string
+  FlyMyAiBaseUrl {.threadvar.}: string
+  FlyMyAiAdultImageModel {.threadvar.}: string
+  FlyMyAiSafeImageModel {.threadvar.}: string
   CerebrasGemma4Model {.threadvar.}: string
   PromptConfigFile {.threadvar.}: string
   ReferenceSkillRoot {.threadvar.}: string

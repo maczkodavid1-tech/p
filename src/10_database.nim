@@ -270,6 +270,42 @@ CREATE TABLE IF NOT EXISTS artifacts (
   FOREIGN KEY(task_id) REFERENCES tasks(task_id) ON DELETE CASCADE
 );""")
   s.execRaw("""
+CREATE TABLE IF NOT EXISTS image_generations (
+  image_id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL,
+  task_id TEXT NOT NULL DEFAULT '',
+  agent_id TEXT NOT NULL DEFAULT '',
+  step_id TEXT NOT NULL DEFAULT '',
+  director_model TEXT NOT NULL DEFAULT '',
+  director_enforced INTEGER NOT NULL DEFAULT 0,
+  policy TEXT NOT NULL,
+  upstream_model TEXT NOT NULL,
+  prompt TEXT NOT NULL,
+  size TEXT NOT NULL DEFAULT '',
+  quality TEXT NOT NULL DEFAULT '',
+  moderation TEXT NOT NULL DEFAULT '',
+  watermark INTEGER NOT NULL DEFAULT 0,
+  sequential_image_generation TEXT NOT NULL DEFAULT 'disabled',
+  optimize_prompt_mode TEXT NOT NULL DEFAULT 'standard',
+  reference_count INTEGER NOT NULL DEFAULT 0,
+  image_count INTEGER NOT NULL DEFAULT 0,
+  artifact_ids_json TEXT NOT NULL DEFAULT '[]',
+  paths_json TEXT NOT NULL DEFAULT '[]',
+  status TEXT NOT NULL,
+  error TEXT NOT NULL DEFAULT '',
+  latency_ms INTEGER NOT NULL DEFAULT 0,
+  inference_time REAL NOT NULL DEFAULT 0,
+  token_cost INTEGER NOT NULL DEFAULT 0,
+  request_json TEXT NOT NULL DEFAULT '{}',
+  response_json TEXT NOT NULL DEFAULT '{}',
+  created_at REAL NOT NULL,
+  updated_at REAL NOT NULL,
+  FOREIGN KEY(tenant_id) REFERENCES tenants(tenant_id) ON DELETE CASCADE
+);""")
+  s.execRaw("CREATE INDEX IF NOT EXISTS idx_image_generations_task ON image_generations(task_id, created_at DESC);")
+  s.execRaw("CREATE INDEX IF NOT EXISTS idx_image_generations_tenant ON image_generations(tenant_id, status, created_at DESC);")
+  s.execRaw("CREATE INDEX IF NOT EXISTS idx_image_generations_policy ON image_generations(tenant_id, policy, created_at DESC);")
+  s.execRaw("""
 CREATE TABLE IF NOT EXISTS skills (
   skill_id TEXT PRIMARY KEY,
   tenant_id TEXT NOT NULL DEFAULT 'local',

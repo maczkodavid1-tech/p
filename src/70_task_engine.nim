@@ -1,11 +1,14 @@
 proc specialistSystem(role: ModelRole): string =
-  case role
+  let base = case role
   of mrGpt6Astra: promptText("gpt6_astra")
   of mrGlm52: promptText("glm52")
   of mrGemini38: promptText("gemini38")
   of mrMiniMaxM3: promptText("minimax_m3")
   of mrGrok43: promptText("grok43")
   of mrOrchestrator: promptText("orchestrator_router")
+  if role in {mrGemini38, mrGrok43}:
+    return base & "\n\n" & promptText("image_generation")
+  base
 
 proc subAgentSystem(role: ModelRole): string =
   let core = promptText("subagent_core")
@@ -33,6 +36,7 @@ proc buildStepMessages(h: TaskHandle, step: JsonNode, role: ModelRole): JsonNode
     "\n\nRELEVANT LEARNED MEMORY:\n" & canonical(memory) &
     "\n\nACTIVE SUBAGENT TREE:\n" & canonical(subAgentTreeJson(h.taskId)) &
     "\n\nAVAILABLE REAL TOOLS:\n" & canonical(toolCatalog()) &
+    "\n\nGENERATED IMAGE HISTORY:\n" & canonical(imageGenerationCatalogJson(h.taskId, 12)) &
     "\n\nVALID SUBAGENT MODEL ROLE IDS:\n" & configuredSubAgentModelRoleNames().join(", ")
   result = %*[
     {"role": "system", "content": specialistSystem(role)},
@@ -50,6 +54,10 @@ proc buildStepMessages(h: TaskHandle, step: JsonNode, role: ModelRole): JsonNode
               break
           if hasMedia:
             result.add(copy(original))
+  if role in {mrGemini38, mrGrok43}:
+    let imageContext = imageContextMessage(h, role, imageContextBudget(result))
+    if not imageContext.isNil:
+      result.add(imageContext)
 
 
 proc descriptorAccepts(value: JsonNode, descriptor: string): bool =
@@ -98,7 +106,7 @@ proc validateToolArguments(spec: ToolSpec, args: JsonNode): string =
       return "unknown tool argument: " & key
   ""
 
-proc executeToolAction(h: TaskHandle, action: JsonNode): Future[ToolResult] {.async.} =
+proc executeToolAction(h: TaskHandle, action: JsonNode, actorModel = "", actorStepId = ""): Future[ToolResult] {.async.} =
   if action.isNil or action.kind != JObject:
     return ToolResult(ok: true, payload: newJObject(), receipt: "none", message: "no action")
   let name = action{"tool"}.getStr("")
@@ -113,6 +121,12 @@ proc executeToolAction(h: TaskHandle, action: JsonNode): Future[ToolResult] {.as
     args = newJObject()
   if args.kind != JObject:
     return ToolResult(ok: false, payload: %*{"tool": name}, receipt: "invalid_args", message: "tool args must be an object")
+  if actorModel.len > 0 and args{"_actor_model"}.getStr("").strip().len == 0:
+    args["_actor_model"] = %actorModel
+  if actorStepId.len > 0 and args{"_actor_step_id"}.getStr("").strip().len == 0:
+    args["_actor_step_id"] = %actorStepId
+  if h.taskId.len > 0 and args{"_actor_task_id"}.getStr("").strip().len == 0:
+    args["_actor_task_id"] = %h.taskId
   let argumentError = validateToolArguments(toolRegistry[name], args)
   if argumentError.len > 0:
     return ToolResult(ok: false, payload: %*{"tool": name, "args": args}, receipt: "invalid_args", message: argumentError)
@@ -182,18 +196,20 @@ proc modelStep(h: TaskHandle, step: JsonNode): Future[(bool, string)] {.async.} 
   var summary = node{"summary"}.getStr("")
   var finalText = node{"final"}.getStr("")
   var requestedComplete = node{"step_complete"}.getBool(false)
-  if role == mrGemini38 and node.hasKey("images"):
+  if role in {mrGemini38, mrGrok43} and node.hasKey("images"):
     if node["images"].kind != JArray or node["images"].elems.len == 0:
       h.transitionOrchestrator(osReflect)
       h.setStepStatus(stepId, "needs_replan")
       acquire(h.lock)
-      h.obs = %*{"status": "model_output_invalid", "step_id": stepId, "error": "Gemini images output must be a non-empty array"}
+      h.obs = %*{"status": "model_output_invalid", "step_id": stepId, "error": modelRoleName(role) & " images output must be a non-empty array"}
       release(h.lock)
       h.persistTask()
       return (false, "")
+    action = %*{"tool": "image_generate", "args": %*{"images": node["images"], "_actor_model": modelRoleName(role), "_actor_step_id": stepId}}
     finalText = canonical(node)
-    summary = "Gemini visual analysis returned structured image specifications"
-    requestedComplete = true
+    if summary.len == 0:
+      summary = modelRoleName(role) & " directed " & $node["images"].elems.len & " FlyMyAI image generation"
+    requestedComplete = node{"step_complete"}.getBool(true)
   else:
     if node.hasKey("action"):
       action = node["action"]
@@ -209,7 +225,7 @@ proc modelStep(h: TaskHandle, step: JsonNode): Future[(bool, string)] {.async.} 
   var totalLatency = modelLatency
   if not action.isNil and action.kind == JObject and action{"tool"}.getStr("").len > 0:
     let toolStarted = getMonoTime()
-    toolRes = await h.executeToolAction(action)
+    toolRes = await h.executeToolAction(action, modelRoleName(role), stepId)
     totalLatency += int((getMonoTime() - toolStarted).inMilliseconds)
     acquire(h.lock)
     h.obs = %*{
@@ -324,6 +340,62 @@ proc verifyTerminal(h: TaskHandle): (bool, JsonNode) =
         let ok = count == 0
         if not ok: allOk = false
         report.add(%*{"verifier": kind, "ok": ok, "blockers_count": count})
+      of "image_generated":
+        let required = max(1, verifier{"count"}.getInt(1).int)
+        let policyFilter = verifier{"policy"}.getStr("").strip().toLowerAscii()
+        let minBytes = max(0, verifier{"min_bytes"}.getInt(0).int)
+        let imageFilter = verifier{"image_id"}.getStr("").strip()
+        var imageSql = "SELECT image_id, paths_json FROM image_generations WHERE task_id=? AND status='succeeded'"
+        var imageParams = @[%h.taskId]
+        if policyFilter.len > 0:
+          imageSql.add(" AND policy=?")
+          imageParams.add(%policyFilter)
+        if imageFilter.len > 0:
+          imageSql.add(" AND image_id=?")
+          imageParams.add(%imageFilter)
+        imageSql.add(" ORDER BY created_at DESC")
+        var produced = 0
+        var satisfied = 0
+        for r in store.query(imageSql, imageParams):
+          let paths = r.getJson("paths_json", newJArray())
+          if paths.kind != JArray:
+            continue
+          for entry in paths.elems:
+            if entry.kind != JObject:
+              continue
+            inc produced
+            let storedPath = absolutePath(entry{"path"}.getStr(""))
+            let storedBytes = entry{"bytes"}.getInt(0).int
+            if storedPath.len > 0 and fileExists(storedPath) and storedBytes >= minBytes:
+              inc satisfied
+        let ok = satisfied >= required
+        if not ok: allOk = false
+        report.add(%*{"verifier": kind, "policy": policyFilter, "image_id": imageFilter, "ok": ok, "required": required, "satisfied": satisfied, "produced": produced, "min_bytes": minBytes})
+      of "artifact_exists":
+        let artifactKind = verifier{"kind"}.getStr("").strip().toLowerAscii()
+        let nameFilter = verifier{"name"}.getStr("").strip()
+        let artifactFilter = verifier{"artifact_id"}.getStr("").strip()
+        let required = max(1, verifier{"count"}.getInt(1).int)
+        var artifactSql = "SELECT artifact_id, name, kind, path, mime_type FROM artifacts WHERE task_id=?"
+        var artifactParams = @[%h.taskId]
+        if artifactKind.len > 0:
+          artifactSql.add(" AND kind=?")
+          artifactParams.add(%artifactKind)
+        if artifactFilter.len > 0:
+          artifactSql.add(" AND artifact_id=?")
+          artifactParams.add(%artifactFilter)
+        var matched = newJArray()
+        for r in store.query(artifactSql, artifactParams):
+          let storedPath = absolutePath(r.getStr("path"))
+          if storedPath.len == 0 or not fileExists(storedPath):
+            continue
+          let storedName = r.getStr("name")
+          if nameFilter.len > 0 and nameFilter notin storedName:
+            continue
+          matched.add(%*{"artifact_id": r.getStr("artifact_id"), "name": storedName, "kind": r.getStr("kind"), "mime_type": r.getStr("mime_type"), "path": r.getStr("path")})
+        let ok = matched.elems.len >= required
+        if not ok: allOk = false
+        report.add(%*{"verifier": kind, "kind_filter": artifactKind, "name": nameFilter, "artifact_id": artifactFilter, "ok": ok, "required": required, "matched": matched.elems.len, "artifacts": matched})
       else:
         allOk = false
         report.add(%*{"verifier": kind, "ok": false, "error": "unknown verifier"})
@@ -416,11 +488,12 @@ proc executeMicroAction(h: TaskHandle): Future[bool] {.async.} =
     release(h.lock)
     return false
   let action = copy(h.sigma["system1"]["queued_actions"][0])
+  let microStepId = h.sigma{"plan"}{"current_step_id"}.getStr("")
   h.sigma["system1"]["queued_actions"].elems.delete(0)
   release(h.lock)
   if action.kind != JObject:
     return false
-  let result = await h.executeToolAction(action)
+  let result = await h.executeToolAction(action, modelRoleName(mrOrchestrator), microStepId)
   acquire(h.lock)
   inc h.stepIndex
   h.obs = %*{"status": (if result.ok: "tool_completed" else: "tool_failed"), "action": action, "tool_result": result.payload, "message": result.message, "receipt": result.receipt}
@@ -595,6 +668,7 @@ proc system1Tick(h: TaskHandle) {.async.} =
     return
   try:
     var queuedAction: JsonNode = nil
+    var queuedActorStep = ""
     acquire(h.lock)
     if h.maxSteps > 0 and h.stepIndex >= h.maxSteps:
       h.status = "halted"
@@ -612,6 +686,7 @@ proc system1Tick(h: TaskHandle) {.async.} =
     if h.sigma{"system1"}{"queued_actions"}.kind == JArray and h.sigma["system1"]["queued_actions"].elems.len > 0:
       queuedAction = copy(h.sigma["system1"]["queued_actions"][0])
       h.sigma["system1"]["queued_actions"].elems.delete(0)
+      queuedActorStep = h.sigma{"plan"}{"current_step_id"}.getStr("")
     let step = if routeReady: currentPlanStep(h.sigma) else: nil
     release(h.lock)
     if not routeReady:
@@ -619,7 +694,7 @@ proc system1Tick(h: TaskHandle) {.async.} =
     if not queuedAction.isNil:
       h.transitionOrchestrator(osAct)
       let started = getMonoTime()
-      let toolRes = await h.executeToolAction(queuedAction)
+      let toolRes = await h.executeToolAction(queuedAction, modelRoleName(mrOrchestrator), queuedActorStep)
       let latency = int((getMonoTime() - started).inMilliseconds)
       acquire(h.lock)
       h.obs = %*{"status": (if toolRes.ok: "tool_completed" else: "tool_failed"), "step_id": h.sigma{"plan"}{"current_step_id"}.getStr(""), "model": "orchestrator", "action": queuedAction, "tool_result": toolRes.payload, "message": toolRes.message, "receipt": toolRes.receipt}
@@ -1061,6 +1136,10 @@ proc subAgentSupervisor(a: SubAgentHandle) {.async.} =
         a.persistSubAgentEvent(%*{"type": "failed", "error": "subagent liveness bound reached before verified completion"})
         break
       let started = getMonoTime()
+      if a.modelRole in {mrGemini38, mrGrok43}:
+        let imageContext = imageContextMessage(a.rootTask, a.modelRole, imageContextBudget(messages))
+        if not imageContext.isNil:
+          messages.add(imageContext)
       var resp: LlmResponse
       try:
         resp = await invokeModel(a.modelRole, messages, a.modelRole != mrGemini38, a.rootTask.tenantId, a.taskId)
@@ -1085,7 +1164,10 @@ proc subAgentSupervisor(a: SubAgentHandle) {.async.} =
         a.persistSubAgent()
         a.persistSubAgentEvent(%*{"type": "invalid_output", "content": resp.content, "latency_ms": latency})
         continue
-      let action = node{"action"}
+      var action = node{"action"}
+      let actorChoseTool = not action.isNil and action.kind == JObject and action{"tool"}.getStr("").len > 0
+      if not actorChoseTool and a.modelRole in {mrGemini38, mrGrok43} and node.hasKey("images") and node["images"].kind == JArray and node["images"].elems.len > 0:
+        action = %*{"tool": "image_generate", "args": %*{"images": node["images"]}}
       if not action.isNil and action.kind == JObject and action{"tool"}.getStr("").len > 0:
         let actorAction = subAgentActionWithActor(a, action)
         acquire(a.lock)
@@ -1093,7 +1175,7 @@ proc subAgentSupervisor(a: SubAgentHandle) {.async.} =
         a.state["last_action"] = copy(action)
         release(a.lock)
         a.persistSubAgentEvent(%*{"type": "tool_start", "action": action, "latency_ms": latency})
-        let toolResult = await a.rootTask.executeToolAction(actorAction)
+        let toolResult = await a.rootTask.executeToolAction(actorAction, modelRoleName(a.modelRole), a.state{"step_id"}.getStr(""))
         let observation = %*{"ok": toolResult.ok, "payload": copy(toolResult.payload), "message": toolResult.message, "receipt": toolResult.receipt}
         a.appendSubAgentMessage("user", "TOOL OBSERVATION:\n" & canonical(observation) & "\nContinue the atomic agentic cycle from this exact observation. You may use any available tool, create further subagents with any configured model, or finish only after verification.")
         acquire(a.lock)
@@ -1105,11 +1187,8 @@ proc subAgentSupervisor(a: SubAgentHandle) {.async.} =
         a.persistSubAgent()
         a.persistSubAgentEvent(%*{"type": "tool_result", "action": action, "observation": observation})
         continue
-      var done = node{"done"}.getBool(node{"step_complete"}.getBool(false))
+      let done = node{"done"}.getBool(node{"step_complete"}.getBool(false))
       var finalText = node{"final"}.getStr("")
-      if a.modelRole == mrGemini38 and node.hasKey("images") and node["images"].kind == JArray and node["images"].elems.len > 0:
-        done = true
-        finalText = canonical(node)
       if done:
         if finalText.len == 0:
           finalText = node{"summary"}.getStr(resp.content)
