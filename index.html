@@ -844,6 +844,22 @@ body{ position: fixed; inset: 0; }
 #sidebar, .ctx-menu, .ctx-overlay{ position: fixed !important; }
 #stb{ position: fixed !important; }
 .as-backdrop{ position: absolute !important; }
+.samasante-glass-button{
+  position: relative !important;
+  overflow: hidden;
+  isolation: isolate;
+  background: transparent !important;
+  background-image: none !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+.samasante-glass-button::before,
+.samasante-glass-button::after{
+  display: none !important;
+  content: none !important;
+}
 </style>
 
 
@@ -4406,7 +4422,7 @@ body{ position: fixed; inset: 0; }
 
   function restoreGlassFallback(){
     var style = document.createElement("style");
-    style.textContent = ".glass-host,.lg,#sidebar,.ibox,.ctx-menu,.as-group,.as-cancel,.cb,.toast,#stb,.src-chip,.srch-bar,.file-chip,.sb-si,.sb-new,.u .bubble,.hcard.active,.rcn-bar{background:linear-gradient(145deg,var(--liquid2),var(--liquid3) 48%,var(--liquid))!important;border:.45px solid var(--liquid-border)!important;box-shadow:0 .7px 0 var(--liquid-inset) inset,0 -.45px 0 rgba(0,0,0,.14) inset,0 0 0 .35px rgba(80,90,255,.07),0 14px 42px var(--liquid-shadow)!important;-webkit-backdrop-filter:blur(36px) saturate(190%) contrast(1.08) brightness(1.04)!important;backdrop-filter:blur(36px) saturate(190%) contrast(1.08) brightness(1.04)!important;}";
+     style.textContent = ".glass-host,.lg,.samasante-glass-button,#sidebar,.ibox,.ctx-menu,.as-group,.as-cancel,.cb,.toast,#stb,.src-chip,.srch-bar,.file-chip,.sb-si,.sb-new,.u .bubble,.hcard.active,.rcn-bar{background:linear-gradient(145deg,var(--liquid2),var(--liquid3) 48%,var(--liquid))!important;border:.45px solid var(--liquid-border)!important;box-shadow:0 .7px 0 var(--liquid-inset) inset,0 -.45px 0 rgba(0,0,0,.14) inset,0 0 0 .35px rgba(80,90,255,.07),0 14px 42px var(--liquid-shadow)!important;-webkit-backdrop-filter:blur(36px) saturate(190%) contrast(1.08) brightness(1.04)!important;backdrop-filter:blur(36px) saturate(190%) contrast(1.08) brightness(1.04)!important;}";
     document.head.appendChild(style);
   }
 
@@ -4719,7 +4735,7 @@ body{ position: fixed; inset: 0; }
     }
 
     collect(){
-      const SEL = ".glass-host, .lg, #sidebar, .ibox, .ctx-menu, .as-group, .as-cancel, .cb, .toast, #stb, .src-chip, .srch-bar, .file-chip, .sb-si, .sb-new, .u .bubble, .hcard.active, .rcn-bar";
+      const SEL = ".glass-host, .lg, .samasante-glass-button, #sidebar, .ibox, .ctx-menu, .as-group, .as-cancel, .cb, .toast, #stb, .src-chip, .srch-bar, .file-chip, .sb-si, .sb-new, .u .bubble, .hcard.active, .rcn-bar";
       let list;
       try{ list = document.querySelectorAll(SEL); }
       catch(e){ list = []; }
@@ -4886,6 +4902,29 @@ body{ position: fixed; inset: 0; }
 <script>
 (function(){
   "use strict";
+  function markLiquidGlassButtons(root){
+    var scope = root && root.querySelectorAll ? root : document;
+    var nodes = scope.querySelectorAll("button:not([data-liquid-glass='off'])");
+    for(var i = 0; i < nodes.length; i++){
+      nodes[i].classList.add("samasante-glass-button");
+    }
+  }
+  markLiquidGlassButtons(document);
+  if(typeof MutationObserver !== "undefined" && document.body){
+    new MutationObserver(function(records){
+      for(var i = 0; i < records.length; i++){
+        for(var j = 0; j < records[i].addedNodes.length; j++){
+          var node = records[i].addedNodes[j];
+          if(node.nodeType === 1){
+            if(node.matches && node.matches("button:not([data-liquid-glass='off'])")){
+              node.classList.add("samasante-glass-button");
+            }
+            markLiquidGlassButtons(node);
+          }
+        }
+      }
+    }).observe(document.body, { childList: true, subtree: true });
+  }
   function bindSpringPress(){
     if(typeof GlassKit === "undefined" || !GlassKit.Spring){
       setTimeout(bindSpringPress, 40);
