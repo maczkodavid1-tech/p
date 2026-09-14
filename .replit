@@ -38,6 +38,6 @@ externalPort = 80
 CEREBRAS_GEMMA4_MODEL = "qwen-3.8-27b"
 
 [deployment]
-deploymentTarget = "vm"
+deploymentTarget = "autoscale"
 run = ["./main"]
 build = ["nim", "c", "--threads:off", "-d:ssl", "-d:release", "main.nim"]

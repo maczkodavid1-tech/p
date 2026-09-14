@@ -1,0 +1,40 @@
+Hint: used config file '/nix/store/caak801vp479rl850kmwrmshnz90078d-x86_64-unknown-linux-gnu-nim-wrapper-2.2.4/etc/nim/nim.cfg' [Conf]
+Hint: used config file '/nix/store/caak801vp479rl850kmwrmshnz90078d-x86_64-unknown-linux-gnu-nim-wrapper-2.2.4/etc/nim/config.nims' [Conf]
+.........................................................................................................................................................
+/home/runner/workspace/src/00_runtime.nim(1, 11) Warning: use command `nimble install checksums` and import `checksums/sha1` instead; sha1 is deprecated [Deprecated]
+......................
+/home/runner/workspace/src/100_http.nim(444, 40) template/generic instantiation of `async` from here
+/nix/store/gdxcfavh457rc7hlwn4479bjrmgagkfv-nim-unwrapped-2.2.4/nim/lib/pure/asyncmacro.nim(247, 31) Warning: 'taskSupervisor (Async)' is not GC-safe as it accesses 'activeTasks' which is a global using GC'ed memory [GcUnsafe2]
+/home/runner/workspace/src/100_http.nim(444, 40) template/generic instantiation of `async` from here
+/home/runner/workspace/src/70_task_engine.nim(759, 6) Warning: 'taskSupervisor' is not GC-safe as it calls 'taskSupervisor (Async)' [GcUnsafe2]
+/home/runner/workspace/src/100_http.nim(444, 40) template/generic instantiation of `async` from here
+/home/runner/workspace/src/70_task_engine.nim(780, 6) Warning: 'launchTask' is not GC-safe as it calls 'taskSupervisor' [GcUnsafe2]
+/home/runner/workspace/src/100_http.nim(444, 40) template/generic instantiation of `async` from here
+/nix/store/gdxcfavh457rc7hlwn4479bjrmgagkfv-nim-unwrapped-2.2.4/nim/lib/pure/asyncmacro.nim(247, 31) Warning: 'handleHttpRequest (Async)' is not GC-safe as it calls 'launchTask' [GcUnsafe2]
+.
+/home/runner/workspace/src/00_runtime.nim(122, 6) Hint: 'sqlite3_reset' is declared but not used [XDeclaredButNotUsed]
+/home/runner/workspace/src/00_runtime.nim(129, 6) Hint: 'sqlite3_column_int64' is declared but not used [XDeclaredButNotUsed]
+/home/runner/workspace/src/00_runtime.nim(130, 6) Hint: 'sqlite3_column_double' is declared but not used [XDeclaredButNotUsed]
+/home/runner/workspace/src/20_knowledge.nim(210, 6) Hint: 'digestOf' is declared but not used [XDeclaredButNotUsed]
+/home/runner/workspace/src/20_knowledge.nim(213, 6) Hint: 'stalenessEncoding' is declared but not used [XDeclaredButNotUsed]
+/home/runner/workspace/src/30_network.nim(359, 3) Hint: 'GcsafeToolHandler' is declared but not used [XDeclaredButNotUsed]
+/home/runner/workspace/src/30_network.nim(360, 3) Hint: 'GcsafeRequestHandler' is declared but not used [XDeclaredButNotUsed]
+/home/runner/workspace/src/40_models.nim(11, 6) Hint: 'parseOrchestratorState' is declared but not used [XDeclaredButNotUsed]
+/home/runner/workspace/src/40_models.nim(310, 6) Hint: 'jsonArrayStrings' is declared but not used [XDeclaredButNotUsed]
+/home/runner/workspace/src/40_models.nim(759, 6) Hint: 'extractJsonObject' is declared but not used [XDeclaredButNotUsed]
+/home/runner/workspace/src/50_orchestrator.nim(38, 6) Hint: 'reflectAndDistill' is declared but not used [XDeclaredButNotUsed]
+/home/runner/workspace/src/50_orchestrator.nim(412, 6) Hint: 'recordHandoff' is declared but not used [XDeclaredButNotUsed]
+/home/runner/workspace/src/55_imagegen.nim(1076, 6) Hint: 'runDirectImageGeneration' is declared but not used [XDeclaredButNotUsed]
+/home/runner/workspace/src/55_imagegen.nim(684, 6) Hint: 'imageGenerationListJson' is declared but not used [XDeclaredButNotUsed]
+/home/runner/workspace/src/60_tools.nim(725, 6) Hint: 'initTools' is declared but not used [XDeclaredButNotUsed]
+/home/runner/workspace/src/70_task_engine.nim(480, 6) Hint: 'executeStep' is declared but not used [XDeclaredButNotUsed]
+/home/runner/workspace/src/70_task_engine.nim(485, 6) Hint: 'executeMicroAction' is declared but not used [XDeclaredButNotUsed]
+/home/runner/workspace/src/80_diagnostics.nim(106, 6) Hint: 'diagnosticAllowedTools' is declared but not used [XDeclaredButNotUsed]
+/home/runner/workspace/src/80_diagnostics.nim(323, 6) Hint: 'upsertSeed' is declared but not used [XDeclaredButNotUsed]
+/home/runner/workspace/src/00_runtime.nim(1, 71) Warning: imported and not used: 'strformat' [UnusedImport]
+/home/runner/workspace/src/00_runtime.nim(4, 15) Warning: imported and not used: 'streams' [UnusedImport]
+/home/runner/workspace/src/00_runtime.nim(4, 24) Warning: imported and not used: 'parseutils' [UnusedImport]
+Hint:  [Link]
+Hint: mm: orc; opt: none (DEBUG BUILD, `-d:release` generates faster code)
+105216 lines; 3.617s; 419.047MiB peakmem; proj: /home/runner/workspace/main.nim; out: /home/runner/workspace/main [SuccessX]
+Runtime listening on port 5000

@@ -1,0 +1,40 @@
+[1m[0m[32mHint: [0mused config file '/nix/store/caak801vp479rl850kmwrmshnz90078d-x86_64-unknown-linux-gnu-nim-wrapper-2.2.4/etc/nim/nim.cfg'[36m [Conf][0m[0m
+[1m[0m[32mHint: [0mused config file '/nix/store/caak801vp479rl850kmwrmshnz90078d-x86_64-unknown-linux-gnu-nim-wrapper-2.2.4/etc/nim/config.nims'[36m [Conf][0m[0m
+.........................................................................................................................................................
+[1m/home/runner/workspace/src/00_runtime.nim(1, 11) [0m[33mWarning: [0muse command `nimble install checksums` and import `checksums/sha1` instead; sha1 is deprecated[36m [Deprecated][0m[0m
+......................
+[1m/home/runner/workspace/src/100_http.nim(444, 40) [0mtemplate/generic instantiation of `async` from here[0m
+[1m/nix/store/gdxcfavh457rc7hlwn4479bjrmgagkfv-nim-unwrapped-2.2.4/nim/lib/pure/asyncmacro.nim(247, 31) [0m[33mWarning: [0m'taskSupervisor (Async)' is not GC-safe as it accesses 'activeTasks' which is a global using GC'ed memory[36m [GcUnsafe2][0m[0m
+[1m/home/runner/workspace/src/100_http.nim(444, 40) [0mtemplate/generic instantiation of `async` from here[0m
+[1m/home/runner/workspace/src/70_task_engine.nim(759, 6) [0m[33mWarning: [0m'taskSupervisor' is not GC-safe as it calls 'taskSupervisor (Async)'[36m [GcUnsafe2][0m[0m
+[1m/home/runner/workspace/src/100_http.nim(444, 40) [0mtemplate/generic instantiation of `async` from here[0m
+[1m/home/runner/workspace/src/70_task_engine.nim(780, 6) [0m[33mWarning: [0m'launchTask' is not GC-safe as it calls 'taskSupervisor'[36m [GcUnsafe2][0m[0m
+[1m/home/runner/workspace/src/100_http.nim(444, 40) [0mtemplate/generic instantiation of `async` from here[0m
+[1m/nix/store/gdxcfavh457rc7hlwn4479bjrmgagkfv-nim-unwrapped-2.2.4/nim/lib/pure/asyncmacro.nim(247, 31) [0m[33mWarning: [0m'handleHttpRequest (Async)' is not GC-safe as it calls 'launchTask'[36m [GcUnsafe2][0m[0m
+.
+[1m/home/runner/workspace/src/00_runtime.nim(122, 6) [0m[32mHint: [0m'sqlite3_reset' is declared but not used[36m [XDeclaredButNotUsed][0m[0m
+[1m/home/runner/workspace/src/00_runtime.nim(129, 6) [0m[32mHint: [0m'sqlite3_column_int64' is declared but not used[36m [XDeclaredButNotUsed][0m[0m
+[1m/home/runner/workspace/src/00_runtime.nim(130, 6) [0m[32mHint: [0m'sqlite3_column_double' is declared but not used[36m [XDeclaredButNotUsed][0m[0m
+[1m/home/runner/workspace/src/20_knowledge.nim(210, 6) [0m[32mHint: [0m'digestOf' is declared but not used[36m [XDeclaredButNotUsed][0m[0m
+[1m/home/runner/workspace/src/20_knowledge.nim(213, 6) [0m[32mHint: [0m'stalenessEncoding' is declared but not used[36m [XDeclaredButNotUsed][0m[0m
+[1m/home/runner/workspace/src/30_network.nim(359, 3) [0m[32mHint: [0m'GcsafeToolHandler' is declared but not used[36m [XDeclaredButNotUsed][0m[0m
+[1m/home/runner/workspace/src/30_network.nim(360, 3) [0m[32mHint: [0m'GcsafeRequestHandler' is declared but not used[36m [XDeclaredButNotUsed][0m[0m
+[1m/home/runner/workspace/src/40_models.nim(11, 6) [0m[32mHint: [0m'parseOrchestratorState' is declared but not used[36m [XDeclaredButNotUsed][0m[0m
+[1m/home/runner/workspace/src/40_models.nim(310, 6) [0m[32mHint: [0m'jsonArrayStrings' is declared but not used[36m [XDeclaredButNotUsed][0m[0m
+[1m/home/runner/workspace/src/40_models.nim(759, 6) [0m[32mHint: [0m'extractJsonObject' is declared but not used[36m [XDeclaredButNotUsed][0m[0m
+[1m/home/runner/workspace/src/50_orchestrator.nim(38, 6) [0m[32mHint: [0m'reflectAndDistill' is declared but not used[36m [XDeclaredButNotUsed][0m[0m
+[1m/home/runner/workspace/src/50_orchestrator.nim(412, 6) [0m[32mHint: [0m'recordHandoff' is declared but not used[36m [XDeclaredButNotUsed][0m[0m
+[1m/home/runner/workspace/src/55_imagegen.nim(1076, 6) [0m[32mHint: [0m'runDirectImageGeneration' is declared but not used[36m [XDeclaredButNotUsed][0m[0m
+[1m/home/runner/workspace/src/55_imagegen.nim(684, 6) [0m[32mHint: [0m'imageGenerationListJson' is declared but not used[36m [XDeclaredButNotUsed][0m[0m
+[1m/home/runner/workspace/src/60_tools.nim(725, 6) [0m[32mHint: [0m'initTools' is declared but not used[36m [XDeclaredButNotUsed][0m[0m
+[1m/home/runner/workspace/src/70_task_engine.nim(480, 6) [0m[32mHint: [0m'executeStep' is declared but not used[36m [XDeclaredButNotUsed][0m[0m
+[1m/home/runner/workspace/src/70_task_engine.nim(485, 6) [0m[32mHint: [0m'executeMicroAction' is declared but not used[36m [XDeclaredButNotUsed][0m[0m
+[1m/home/runner/workspace/src/80_diagnostics.nim(106, 6) [0m[32mHint: [0m'diagnosticAllowedTools' is declared but not used[36m [XDeclaredButNotUsed][0m[0m
+[1m/home/runner/workspace/src/80_diagnostics.nim(323, 6) [0m[32mHint: [0m'upsertSeed' is declared but not used[36m [XDeclaredButNotUsed][0m[0m
+[1m/home/runner/workspace/src/00_runtime.nim(1, 71) [0m[33mWarning: [0mimported and not used: 'strformat'[36m [UnusedImport][0m[0m
+[1m/home/runner/workspace/src/00_runtime.nim(4, 15) [0m[33mWarning: [0mimported and not used: 'streams'[36m [UnusedImport][0m[0m
+[1m/home/runner/workspace/src/00_runtime.nim(4, 24) [0m[33mWarning: [0mimported and not used: 'parseutils'[36m [UnusedImport][0m[0m
+[1m[0m[32mHint: [0m[36m [Link][0m[0m
+[1m[0m[32mHint: [0mmm: orc; opt: none (DEBUG BUILD, `-d:release` generates faster code)
+105216 lines; 3.617s; 419.047MiB peakmem; proj: /home/runner/workspace/main.nim; out: /home/runner/workspace/main[36m [SuccessX][0m[0m
+Runtime listening on port 5000
