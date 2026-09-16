@@ -1,4 +1,4 @@
-  import std/[asyncdispatch, asynchttpserver, asyncnet, json, strutils, strformat,
+import std/[asyncdispatch, asynchttpserver, asyncnet, json, strutils, strformat,
   os, times, tables, sets, sequtils, math, algorithm, random, options,
   locks, hashes, base64, uri, deques, monotimes, sha1, mimetypes,
   httpclient, streams, parseutils, osproc, asyncstreams, net, nativesockets,
@@ -21,7 +21,7 @@ const
   SeedreamReferenceSlots = 14
   DefaultAdultImageSize = "2k"
   DefaultSafeImageSize = "1024x1024"
-  DefaultSafeImageQuality = "high"
+  DefaultSafeImageQuality = "medium"
   DefaultSequentialImageGeneration = "disabled"
   DefaultOptimizePromptMode = "standard"
   System1HzInterval = 50
@@ -162,3 +162,4 @@ type
 var
   store {.threadvar.}: Store
   fts5Available {.threadvar.}: bool
+
