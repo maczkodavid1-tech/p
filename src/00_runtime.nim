@@ -13,7 +13,7 @@ const
   DefaultFlyMyAiBaseUrl = "https://api.flymy.ai"
   Gpt6AstraModel = "openai/gpt-6-astra:flex"
   Glm52Model = "zai/glm-5.2"
-  Gemini38Model = "gemini-3.8-flash"
+  Gemini38Model = "models/gemini-3.8-flash"
   MiniMaxM3Model = "minimaxi/minimax-m3"
   Grok43Model = "grok-4.3"
   Seedream5ProImageModel = "flymyai/bytedance-seedream-5_0_pro"

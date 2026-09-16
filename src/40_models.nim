@@ -709,7 +709,7 @@ proc enforcePromptBound(messages: JsonNode) =
 proc effectiveMaxTokens(requested: int, source: string): int =
   let sourceName = source.strip().toLowerAscii()
   let providerMaximum =
-    if sourceName in ["gemini", "gemini38", "gemini-3.8-flash"]: 65536
+    if sourceName in ["gemini", "gemini38", "gemini-3.8-flash", "models/gemini-3.8-flash"]: 65536
     elif sourceName in ["orchestrator", "cerebras", "gemma4", "gemma-4"]: 32768
     else: 131072
   if requested <= 0:

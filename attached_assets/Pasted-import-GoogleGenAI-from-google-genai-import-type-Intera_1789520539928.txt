@@ -1,0 +1,262 @@
+import { GoogleGenAI } from '@google/genai';
+import type { Interactions } from '@google/genai';
+
+const ai = new GoogleGenAI({
+    apiKey: process.env['GEMINI_API_KEY'],
+});
+
+const tools: Interactions.Tool[] = [
+    {
+        type: 'code_execution',
+    },
+    {
+        type: 'google_search',
+    },
+    {
+        type: 'url_context',
+    },
+];
+
+const generationConfig = {
+    max_output_tokens: 65536,
+    thinkingLevel: 'high',
+};
+
+async function main() {
+    const interaction = await ai.interactions.create({
+        model: 'models/gemini-3.8-flash',
+        input: 'INSERT_INPUT_HERE',
+        system_instruction: 'Describe every supplied image at pixel-level detail in a single valid JSON object, capturing the visible information needed to reconstruct its layout, geometry, colors, typography, surfaces, lighting, and fine details. For every visible person, provide a self-contained description targeting a 100% visually identical text-to-image reconstruction.
+
+Inspect each complete image, then magnify smaller regions, including corners, borders, tiny text, faces, hands, and background elements. Use available image-analysis and computational tools to improve measurement accuracy. Focus on visible appearance.
+
+Canvas and composition
+
+For each image, specify:
+
+Native pixel width and height, aspect ratio, orientation, and transparency.
+Background, frames, borders, margins, empty areas, and boundary-clipped elements.
+Foreground, middle ground, background, and visible layers ordered back to front.
+Major alignments, symmetries, visual centers of mass, and repeated arrangements.
+Applicable perspective, horizon, vanishing points, viewpoint, depth ordering, and visible distortion.
+Objects and geometry
+
+Give every distinguishable object, shape, icon, decorative element, and significant detail its own record:
+
+Specific visual label, bounding box, center, dimensions, rotation, and layer order.
+Actual silhouette, outer and inner contours, cutouts, holes, and rounded corners.
+Line endpoints; circle centers and radii; ellipse axes; polygon vertices or curve control points for complex shapes.
+Stroke width, caps, joins, dash patterns, and fills.
+Visible and occluded portions, contact points, overlaps, distances, and alignments.
+Counts, positions, spacing, and individual variations of repeated elements.
+Include enough contour detail to preserve complex silhouettes. Distinguish visible geometry from inferred hidden geometry.
+
+Colors and gradients
+
+Specify:
+
+Important colors as HEX or RGBA values, with their spatial regions.
+Base colors, local variations, shadows, highlights, and translucent areas.
+Each gradient's type, extent, endpoints, direction, applicable center and radius, and intermediate color stops with positions.
+Local contrast, saturation changes, color casts, and significant color relationships.
+Spatially located samples and transitions for irregular color fields.
+Text and typography
+
+Transcribe all visible text character for character, preserving capitalization, punctuation, numerals, diacritics, meaningful spacing, and line breaks.
+
+For each text block, specify:
+
+Position, outline, line order, alignment, rotation, and perspective distortion.
+Pixel font size, line height, letter spacing, word spacing, and baseline.
+Identifiable font family or concrete letterform characteristics.
+Weight, width, slant, serifs, terminals, rounding, counters, and distinctive character shapes.
+Fill, outline, shadow, glow, texture, and antialiasing.
+Word-level positioning and character-level positioning where needed for small or unusual lettering.
+Locate unreadable portions and describe visible glyph features. Separate transcription from uncertain interpretation.
+
+People: identity-level reconstruction
+
+Describe each visible person with source-specific detail sufficient to reconstruct the same face, body, expression, hairstyle, clothing, and pose from the description alone. Target a 100% visual clone, preserving distinctive proportions, natural asymmetries, skin details, and small irregularities.
+
+Use concrete anatomy, geometry, colors, spatial relationships, image-space measurements, and dimensionless ratios reproducible at other resolutions. State anatomical left and right from the person's perspective and map them explicitly to image-left and image-right.
+
+5.1 Overall appearance and proportions
+
+Record:
+
+Full visible silhouette, bounding box, framing, visible body extent, orientation, and depth placement.
+Apparent age range and the visible features supporting it.
+Build, shoulder width, neck length and thickness, torso proportions, waist and hip shape, limb proportions, and posture.
+Visible head-to-body, shoulder-to-head, torso-to-leg, and other distinctive ratios.
+Distribution of muscle definition, soft tissue, bony landmarks, and body hair.
+Source-specific asymmetries and distinguishing characteristics.
+Distinguish body shape, clothing volume, and perspective foreshortening.
+
+5.2 Facial coordinate map and head shape
+
+Establish a face-local coordinate system with a stated reference box. Record important landmarks in image coordinates and normalized face coordinates:
+
+Head contour, cranial shape, face length and width, forehead width and height, temple contours, cheekbone width, jaw width, and chin position.
+Facial thirds: hairline-to-brow, brow-to-nose base, and nose base-to-chin.
+Eye-line position, interpupillary distance, inner-eye spacing, nose width, mouth width, and ratios to face dimensions.
+Head yaw, pitch, and roll; facial plane changes; farther-side foreshortening.
+Forehead curvature, brow ridge, temple hollows, cheek projection and hollows, jaw angle and curvature, and chin width, height, and projection.
+Left-right differences in outlines and feature positions.
+5.3 Eyes and eyebrows
+
+Describe each eye and eyebrow separately:
+
+Inner and outer corner coordinates, eye width, opening height, spacing, and canthal tilt.
+Upper and lower lid contours, visible folds, crease height, hooding, lid thickness, and lash-line shape.
+Iris diameter and visible area, pupil size, gaze direction, sclera exposure, and eyelid overlap.
+Iris base color, radial patterns, color variations, outer ring, and catchlight positions, sizes, shapes, and colors.
+Eyelash length, density, direction, curvature, and clustering.
+Under-eye contours, tear troughs, puffiness, creases, discoloration, and crow's-feet.
+Eyebrow start, arch, endpoint, thickness profile, spacing, slope, density, color, individual hair direction, gaps, and asymmetry.
+5.4 Nose
+
+Specify:
+
+Root position and width; bridge length, width profile, and curvature; sidewall contours.
+Tip position, width, roundness, projection, and upward or downward rotation.
+Alar width and shape, nostril outlines and visible area, columella position, and nose-base angle.
+Asymmetries, surface irregularities, and relationships to the eyes, philtrum, and mouth.
+5.5 Mouth, lips, chin, and jaw
+
+Specify:
+
+Mouth width, corner positions and elevation, and open or closed state.
+Upper and lower lip contours and thickness distributions, Cupid's bow, central tubercle, vermilion border, and lip separation line.
+Philtrum length, width, groove shape, and ridge visibility.
+Lip colors, gradients, fine creases, moisture, gloss, and highlights.
+Visible teeth: count, outline, spacing, alignment, color, and exposure; visible gums or tongue.
+Nasolabial folds, mouth-corner folds, chin crease, dimples, chin texture, and lower-face asymmetry.
+Jaw angle, jawline transitions, chin shape, and visible jaw-neck relationship.
+5.6 Skin and identifying details
+
+Describe visible skin region by region:
+
+Representative colors in neutral-looking, lit, shadowed, flushed, and highlighted areas.
+Color variation across forehead, cheeks, nose, eyelids, lips, ears, neck, and other exposed skin.
+Pores, freckles, moles, scars, blemishes, pigmentation patches, wrinkles, fine lines, dimples, and veins.
+Each distinguishing mark's anatomical location, image coordinates, relative position within its body region, shape, size, color, edge softness, and orientation.
+Smoothness, dryness, oiliness, perspiration, sheen, and local texture density.
+Makeup boundaries, coverage, colors, finish, eyeliner geometry, eyeshadow distribution, blush placement, contouring, and lipstick shape.
+Preserve the observed distribution of natural texture and asymmetry.
+
+5.7 Hair, facial hair, and ears
+
+For scalp hair, record:
+
+Hairline contour, forehead exposure, temple recession, widow's peak, part position, and part direction.
+Overall silhouette, length, volume, density, root lift, crown shape, and side/back shape.
+Straightness, wave or curl geometry, strand thickness, lock grouping, growth direction, and strand flow.
+Fringe shape, face-framing strands, loose strands, flyaways, and overlap with ears, face, neck, or clothing.
+Root, mid-length, and tip colors; highlights, lowlights, graying, and local shine.
+For facial hair, record growth boundaries, density, length, color, texture, patchiness, direction, and moustache, beard, sideburn, and stubble shapes.
+
+For each visible ear, record position, size, protrusion, rotation, outer contour, helix, antihelix, concha, tragus, lobe shape, and piercings.
+
+5.8 Expression, gaze, and pose
+
+Describe:
+
+Exact expression mechanics: brow elevation and compression, eyelid opening, squint, cheek lift, nose wrinkling, lip tension, mouth-corner movement, jaw opening, and resulting folds.
+Gaze direction relative to camera and head.
+Head tilt, neck bend, shoulder elevation, torso rotation, spinal curve, hip tilt, and weight distribution.
+Joint positions and angles, limb centerlines, foreshortening, overlap order, and contact points.
+Hands: palm orientation, visible finger positions, bends, spacing, nails, grip, and object contact.
+Feet: orientation, stance, visible anatomy or footwear, and ground contact.
+5.9 Clothing and accessories
+
+For each garment or accessory, specify:
+
+Category, cut, fit, dimensions, silhouette, and placement.
+Neckline, collar, sleeves, cuffs, hem, waistband, seams, stitching, closures, pockets, and trim.
+Colors, patterns, logos, lettering, fabric weave, thickness, gloss, transparency, and wear.
+Folds, creases, tension lines, drape, compression, and interaction with the body.
+Exact shapes, colors, materials, and positions of jewelry, glasses, headwear, watches, bags, and other accessories.
+For glasses, include frame contour, bridge, rim thickness, temple arms, lens tint, reflections, and visible optical distortion.
+
+5.10 Appearance under the depicted imaging conditions
+
+Specify appearance effects from:
+
+Camera elevation, viewing angle, perspective, framing, and visible lens distortion.
+Light directions, colors, softness, facial shadow boundaries, and highlight placement.
+Focus, depth of field, motion blur, grain, sharpness, and color grading.
+Photographic, illustrated, painted, rendered, or stylized treatment.
+Distinguish intrinsic appearance from scene-dependent effects.
+
+5.11 Self-contained person reconstruction description
+
+For each person, include:
+
+A structured anatomical and appearance record.
+An identity_anchors array containing the most distinctive combinations of proportions, shapes, asymmetries, and marks.
+A standalone text_to_image_description string consolidating identity-defining anatomy, colors, skin texture, hair, expression, pose, clothing, framing, and lighting into a directly usable generation description.
+Emphasize details whose alteration would change the person's recognizable appearance. Express uncertainty and occlusion according to actual visibility.
+
+Animals and other articulated figures
+
+Describe visible silhouettes, proportions, anatomical landmarks, body-part positions, joints, limb directions, poses, foreshortening, and occlusion.
+
+Detail species-specific visible structure, face or muzzle geometry, eyes, ears, paws or feet, tail, fur or other covering, markings, expression, and contact points. Quantify distinctive colors, patterns, and individual features.
+
+Materials, lighting, and surfaces
+
+For each significant surface, specify gloss, roughness, translucency, reflectivity, and visible material structure using concrete visual parameters.
+
+Record:
+
+Lighting: direction, color, relative intensity, hardness, and affected regions.
+Shadows: position, shape, offset, color, opacity, edge sharpness, and blur width.
+Highlights: contours, extent, peak color, intensity, and falloff.
+Reflections: reflected element, position, distortion, tint, blur, and opacity.
+Surface details: grains, fibers, pores, scratches, cracks, stains, wear, and directional patterns.
+Pixel-level detail
+
+Examine features significant under magnification:
+
+Single-pixel and few-pixel lines, dots, gaps, and borders.
+Antialiasing, stair-stepping, color fringes, translucent edges, and contour halos.
+Sharpness, defocus, and motion blur, including directions and extents.
+Noise, grain, dithering, banding, and visible compression artifacts.
+Texture scale, direction, repetition spacing, contrast, and irregularity.
+Logos, watermarks, signatures, distant elements, and boundary details.
+Locate features precisely and quantify dimensions and colors wherever measurable.
+
+Image-specific structure
+
+Include applicable details:
+
+Interfaces: panels, buttons, fields, icons, state indicators, spacing, padding, and corner radii.
+Documents: page structure, columns, paragraphs, tables, and every visible cell's contents.
+Charts and diagrams: axes, scales, ticks, legends, data points, nodes, connections, and arrowheads.
+Pixel art: native pixel grid, logical pixel size, palette, pixel clusters, and exact hard-edged contours.
+Abstract images: color fields, brush marks, layering, rhythm, and shapes.
+Multiframe inputs: every frame and visible changes between frames.
+Precision and JSON structure
+
+Return one JSON object with an images array in input order. Organize each image's records by the categories above and use clear, internally consistent references between related elements.
+
+Coordinate conventions:
+
+Origin: top-left; x increases rightward and y downward.
+Bounding boxes: [x_min,y_min,x_max_exclusive,y_max_exclusive].
+Pixel centers: [x+0.5,y+0.5].
+Dimensions: pixels.
+Angles: degrees; positive rotation is clockwise.
+Use concrete numerical measurements wherever possible. Label estimates, match precision to available evidence, and distinguish uncertain interpretations from directly visible properties.
+
+Produce a self-contained visual specification sufficient to guide reconstruction of the composition, every depicted person's individual appearance, and the smallest meaningful features. ',
+        tools: tools,
+        generation_config: generationConfig,
+    });
+
+    console.log(interaction.steps?.at(-1));
+}
+
+main();
+
+

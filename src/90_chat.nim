@@ -59,12 +59,57 @@ proc routingGoal(messages: JsonNode): string =
           continue
         let typ = item{"type"}.getStr("")
         if typ in ["image", "image_url", "input_image"]:
-          parts.add("[image input present]")
+          parts.add("[visual input present: send this request to gemini38 for image analysis]")
         elif typ in ["video", "video_url", "input_video"]:
           parts.add("[video input present]")
         elif typ in ["file", "document", "input_file"]:
           parts.add("[document input present: " & item{"name"}.getStr(item{"filename"}.getStr(item{"path"}.getStr(""))) & "]")
   parts.join("\n")
+
+proc hasVisualInput(messages: JsonNode): bool =
+  if messages.isNil or messages.kind != JArray:
+    return false
+  for message in messages.elems:
+    if message.kind != JObject:
+      continue
+    let content = message{"content"}
+    if content.kind != JArray:
+      continue
+    for part in content.elems:
+      if part.kind == JObject and part{"type"}.getStr("") in ["image", "image_url", "input_image"]:
+        return true
+  false
+
+proc hasUsableVisualInput(messages: JsonNode): bool =
+  if messages.isNil or messages.kind != JArray:
+    return false
+  for message in messages.elems:
+    if message.kind != JObject:
+      continue
+    let content = message{"content"}
+    if content.kind != JArray:
+      continue
+    for part in content.elems:
+      if part.kind != JObject or part{"type"}.getStr("") notin ["image", "image_url", "input_image"]:
+        continue
+      var value = part{"url"}.getStr(part{"uri"}.getStr(part{"data"}.getStr("")))
+      if part.hasKey("image_url"):
+        if part["image_url"].kind == JObject:
+          value = part["image_url"]{"url"}.getStr(value)
+        elif part["image_url"].kind == JString:
+          value = part["image_url"].getStr()
+      if value.strip().len > 0:
+        return true
+  false
+
+proc visualChat(messages: JsonNode, tenantId: string): Future[DirectChatResult] {.async.} =
+  if not hasVisualInput(messages):
+    raise newException(ValueError, "visual chat requires an image input")
+  if not hasUsableVisualInput(messages):
+    raise newException(ValueError, "image input must contain a data URL, URI, or encoded image data")
+  let specialistMessages = specialistChatMessages(mrGemini38, messages)
+  let response = await invokeModel(mrGemini38, specialistMessages, false, tenantId, "")
+  DirectChatResult(content: response.content, reasoningContent: response.reasoningContent, model: modelRoleName(mrGemini38), usage: copy(response.usage), taskId: "")
 
 proc taskUsage(taskId: string): JsonNode =
   let rows = store.query("SELECT tokens_used FROM tasks WHERE task_id=?", @[%taskId])
@@ -74,6 +119,8 @@ proc taskUsage(taskId: string): JsonNode =
 proc directChat(messages: JsonNode, tenantId: string): Future[DirectChatResult] {.async.} =
   let goal = routingGoal(messages)
   let route = await routeTask(goal, defaultSigma(goal), %*{"status": "chat"}, tenantId, "")
+  if hasVisualInput(messages):
+    return await visualChat(messages, tenantId)
   if routeNeedsExecution(route):
     let spec = %*{"goal": goal, "messages": copy(messages)}
     let h = createTask(goal, spec, tenantId)
@@ -248,6 +295,18 @@ proc runChatJob(jobId: string) {.async.} =
     let goal = routingGoal(messages)
     let route = await routeTask(goal, defaultSigma(goal), %*{"status": "chat_job"}, tenantId, "")
     persistChatJobEvent(jobId, %*{"type": "route", "intent": route.intent, "model": modelRoleName(route.primaryModel), "route": route.raw})
+    if hasVisualInput(messages):
+      discard store.exec("UPDATE chat_jobs SET model=?, updated_at=? WHERE job_id=?", @[%modelRoleName(mrGemini38), %nowF(), %jobId])
+      let response = await visualChat(messages, tenantId)
+      if response.reasoningContent.len > 0 or response.content.len > 0:
+        var deltaEvent = %*{"type": "delta", "model": modelRoleName(mrGemini38)}
+        if response.content.len > 0:
+          deltaEvent["content"] = %response.content
+        if response.reasoningContent.len > 0:
+          deltaEvent["reasoning_content"] = %response.reasoningContent
+        persistChatJobEvent(jobId, deltaEvent)
+      persistChatJobEvent(jobId, %*{"type": "done", "model": modelRoleName(mrGemini38), "task_id": "", "usage": response.usage, "finish_reason": "stop"})
+      return
     if routeNeedsExecution(route):
       let spec = %*{"goal": goal, "messages": copy(messages), "max_steps": req{"max_steps"}.getInt(0)}
       let h = createTask(goal, spec, tenantId)
