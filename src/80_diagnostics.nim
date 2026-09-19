@@ -121,16 +121,16 @@ proc gatePythonProgram(skillCode: string, spec, expectation: JsonNode, observed:
     "spec=json.loads(base64.b64decode(" & escapeJson(spec64) & "))\n" &
     "expectation=json.loads(base64.b64decode(" & escapeJson(expectation64) & "))\n" &
     "observed=json.loads(base64.b64decode(" & escapeJson(observed64) & "))\n" &
-    "root=(pathlib.Path.cwd()/""validation_sandbox"").resolve()\n" &
+    "root=(pathlib.Path.cwd()/'validation_sandbox').resolve()\n" &
     "root.mkdir(parents=True,exist_ok=True)\n" &
-    "state={""facts"":{},""progress"":0.0,""subgoals"":[],""blockers"":[]}\n" &
+    "state={'facts':{},'progress':0.0,'subgoals':[],'blockers':[]}\n" &
     "errors=[]\n" &
     "trace=[]\n" &
     "operation_result={}\n" &
     "operation_done=False\n" &
     "def safe_path(rel):\n" &
     " p=(root/rel).resolve()\n" &
-    " if root not in p.parents: raise RuntimeError(""path escapes sandbox"")\n" &
+    " if root not in p.parents: raise RuntimeError('path escapes sandbox')\n" &
     " return p\n" &
     "def eval_math(node):\n" &
     " if isinstance(node,ast.Expression): return eval_math(node.body)\n" &
@@ -147,63 +147,63 @@ proc gatePythonProgram(skillCode: string, spec, expectation: JsonNode, observed:
     "  if isinstance(node.op,ast.Div): return left/right\n" &
     "  if isinstance(node.op,ast.Mod): return left%right\n" &
     "  if isinstance(node.op,ast.Pow): return left**right\n" &
-    " raise RuntimeError(""unsupported expression"")\n" &
+    " raise RuntimeError('unsupported expression')\n" &
     "def execute_operation():\n" &
     " global operation_done,operation_result\n" &
     " if operation_done: return\n" &
-    " operation=spec.get(""operation"",'''')\n" &
-    " if operation==""math"":\n" &
-    "  value=eval_math(ast.parse(spec.get(""expression"",''''),mode=''eval''))\n" &
-    "  state[""facts""][""answer""]=value; state[""progress""]=1.0\n" &
-    "  operation_result={""ok"":True,""value"":value}\n" &
-    " elif operation==""file"":\n" &
-    "  target=safe_path(spec.get(""path"",'''')); content=spec.get(""content"",'''')\n" &
+    " operation=spec.get('operation','')\n" &
+    " if operation=='math':\n" &
+    "  value=eval_math(ast.parse(spec.get('expression',''),mode='eval'))\n" &
+    "  state['facts']['answer']=value; state['progress']=1.0\n" &
+    "  operation_result={'ok':True,'value':value}\n" &
+    " elif operation=='file':\n" &
+    "  target=safe_path(spec.get('path','')); content=spec.get('content','')\n" &
     "  target.parent.mkdir(parents=True,exist_ok=True); target.write_text(content)\n" &
     "  actual=target.read_text(); ok=target.is_file() and actual==content\n" &
-    "  state[""progress""]=1.0 if ok else 0.0\n" &
-    "  operation_result={""ok"":ok,""path"":spec.get(""path"",''''),""output"":actual}\n" &
-    " elif operation==""memory"":\n" &
-    "  hits=int(observed.get(""memory_hits"",0)); state[""facts""][""memory_routed""]=hits>0\n" &
-    "  state[""progress""]=1.0 if hits>0 else 0.0\n" &
-    "  operation_result={""ok"":hits>0,""hits"":hits,""query"":spec.get(""query"",'''')}\n" &
-    " else: raise RuntimeError(""unsupported diagnostic operation"")\n" &
+    "  state['progress']=1.0 if ok else 0.0\n" &
+    "  operation_result={'ok':ok,'path':spec.get('path',''),'output':actual}\n" &
+    " elif operation=='memory':\n" &
+    "  hits=int(observed.get('memory_hits',0)); state['facts']['memory_routed']=hits>0\n" &
+    "  state['progress']=1.0 if hits>0 else 0.0\n" &
+    "  operation_result={'ok':hits>0,'hits':hits,'query':spec.get('query','')}\n" &
+    " else: raise RuntimeError('unsupported diagnostic operation')\n" &
     " operation_done=True\n" &
     "def verify_expectations():\n" &
-    " verifiers=expectation.get(""verifiers"",expectation if isinstance(expectation,list) else [])\n" &
-    " if not verifiers: raise RuntimeError(""diagnostic has no verifiers"")\n" &
+    " verifiers=expectation.get('verifiers',expectation if isinstance(expectation,list) else [])\n" &
+    " if not verifiers: raise RuntimeError('diagnostic has no verifiers')\n" &
     " for verifier in verifiers:\n" &
-    "  kind=verifier.get(""type"",'''')\n" &
-    "  if kind==""state_path_equals"":\n" &
+    "  kind=verifier.get('type','')\n" &
+    "  if kind=='state_path_equals':\n" &
     "   current=state\n" &
-    "   for part in verifier.get(""path"",'''').strip(""/"").split(""/""):\n" &
+    "   for part in verifier.get('path','').strip('/').split('/'):\n" &
     "    current=current.get(part) if isinstance(current,dict) else None\n" &
-    "   if current!=verifier.get(""expected""): raise RuntimeError(""state verification failed: ""+verifier.get(""path"",''''))\n" &
-    "  elif kind==""file_exists"":\n" &
-    "   if not safe_path(verifier.get(""path"",'''')).is_file(): raise RuntimeError(""file existence verification failed"")\n" &
-    "  elif kind==""file_contains"":\n" &
-    "   target=safe_path(verifier.get(""path"",''''))\n" &
-    "   if not target.is_file() or verifier.get(""needle"",'''') not in target.read_text(): raise RuntimeError(""file content verification failed"")\n" &
-    "  elif kind==""all_subgoals_resolved"":\n" &
-    "   if any(item.get(""status"") in (""open"",""in_progress"",""queued"",""running"") for item in state.get(""subgoals"",[])): raise RuntimeError(""subgoals remain unresolved"")\n" &
-    "  elif kind==""no_blockers"":\n" &
-    "   if state.get(""blockers""): raise RuntimeError(""blockers remain"")\n" &
-    "  else: raise RuntimeError(""unsupported diagnostic verifier"")\n" &
-    "context={""completion_criteria"":bool(expectation.get(""verifiers"",[])),""actual_file_state"":False,""real_runtime_output"":False,""browser_session"":False,""image_generate_tool"":False}\n" &
+    "   if current!=verifier.get('expected'): raise RuntimeError('state verification failed: '+verifier.get('path',''))\n" &
+    "  elif kind=='file_exists':\n" &
+    "   if not safe_path(verifier.get('path','')).is_file(): raise RuntimeError('file existence verification failed')\n" &
+    "  elif kind=='file_contains':\n" &
+    "   target=safe_path(verifier.get('path',''))\n" &
+    "   if not target.is_file() or verifier.get('needle','') not in target.read_text(): raise RuntimeError('file content verification failed')\n" &
+    "  elif kind=='all_subgoals_resolved':\n" &
+    "   if any(item.get('status') in ('open','in_progress','queued','running') for item in state.get('subgoals',[])): raise RuntimeError('subgoals remain unresolved')\n" &
+    "  elif kind=='no_blockers':\n" &
+    "   if state.get('blockers'): raise RuntimeError('blockers remain')\n" &
+    "  else: raise RuntimeError('unsupported diagnostic verifier')\n" &
+    "context={'completion_criteria':bool(expectation.get('verifiers',[])),'actual_file_state':False,'real_runtime_output':False,'browser_session':False,'image_generate_tool':False}\n" &
     "def run_instruction(keyword,value):\n" &
-    " if keyword==""WHEN"":\n" &
-    "  if not value: raise RuntimeError(""empty trigger"")\n" &
-    " elif keyword==""REQUIRE"":\n" &
-    "  if not context.get(value,False): raise RuntimeError(""required runtime capability unavailable: ""+value)\n" &
-    " elif keyword==""STEP"":\n" &
-    "  if value in (""inspect"",""observe"",""diagnose"",""execute"",""modify"",""interact"",""repair"",""rerun""):\n" &
-    "   execute_operation(); context[""actual_file_state""]=bool(operation_result.get(""ok"")); context[""real_runtime_output""]=bool(operation_result)\n" &
-    "  else: raise RuntimeError(""unsupported executable DSL step: ""+value)\n" &
-    " elif keyword==""VERIFY"":\n" &
-    "  if value not in (""reread_or_execute"",""completion_criteria_satisfied"",""zero_errors_remaining"",""requested_behavior"",""target_state"",""artifact_exists""):\n" &
-    "   raise RuntimeError(""unsupported executable DSL verifier: ""+value)\n" &
+    " if keyword=='WHEN':\n" &
+    "  if not value: raise RuntimeError('empty trigger')\n" &
+    " elif keyword=='REQUIRE':\n" &
+    "  if not context.get(value,False): raise RuntimeError('required runtime capability unavailable: '+value)\n" &
+    " elif keyword=='STEP':\n" &
+    "  if value in ('inspect','observe','diagnose','execute','modify','interact','repair','rerun'):\n" &
+    "   execute_operation(); context['actual_file_state']=bool(operation_result.get('ok')); context['real_runtime_output']=bool(operation_result)\n" &
+    "  else: raise RuntimeError('unsupported executable DSL step: '+value)\n" &
+    " elif keyword=='VERIFY':\n" &
+    "  if value not in ('reread_or_execute','completion_criteria_satisfied','zero_errors_remaining','requested_behavior','target_state','artifact_exists'):\n" &
+    "   raise RuntimeError('unsupported executable DSL verifier: '+value)\n" &
     "  execute_operation(); verify_expectations()\n" &
-    " elif keyword==""RECOVER"":\n" &
-    "  trace.append({""recover"":value})\n" &
+    " elif keyword=='RECOVER':\n" &
+    "  trace.append({'recover':value})\n" &
     "try:\n" &
     " for raw in dsl.splitlines():\n" &
     "  line=raw.strip()\n" &
@@ -212,7 +212,7 @@ proc gatePythonProgram(skillCode: string, spec, expectation: JsonNode, observed:
     "   run_instruction(parts[0].upper(),parts[1].strip() if len(parts)>1 else '''')\n" &
     "except Exception as error:\n" &
     " errors.append(str(error))\n" &
-    "print(json.dumps({""passed"":not errors,""operation"":operation_result,""state"":state,""trace"":trace,""errors"":errors},separators=(',',':')))\n"
+    "print(json.dumps({'passed':not errors,'operation':operation_result,'state':state,'trace':trace,'errors':errors},separators=(',',':')))\n"
 
 proc runGateSandbox(skillCode: string, spec, expectation: JsonNode, observed: JsonNode): Future[JsonNode] {.async.} =
   let createBody = %*{
@@ -266,21 +266,17 @@ proc runDiagnosticRolloutCase(tenantId: string, diagnostic: Row, candidateOverri
   let operation = spec{"operation"}.getStr("")
   var operationResult = newJObject()
   var candidateEvidence = newJObject()
+  var observed = newJObject()
   if not candidateOverride.isNil and candidateOverride.kind == JObject:
     let skillCode = candidateOverride{"skill_code"}.getStr("")
     let validation = validateSkillDsl(skillCode)
     if not validation[0]:
       return %*{"passed": false, "domain": diagnostic.getStr("domain"), "candidate_evaluated": true, "candidate_error": "invalid candidate DSL", "validation_errors": validation[1]}
-    let domain = candidateOverride{"domain"}.getStr("general")
-    let trigger = candidateOverride{"trigger_spec"}.getStr(candidateOverride{"trigger"}.getStr(""))
-    let procedure = candidateOverride{"procedure_spec"}.getStr(candidateOverride{"procedure"}.getStr(""))
-    let relevantText = (domain & " " & trigger & " " & procedure & " " & skillCode).toLowerAscii()
-    let diagnosticText = (diagnostic.getStr("domain") & " " & spec{"goal"}.getStr("") & " " & operation).toLowerAscii()
-    var overlap = 0
-    for term in contentTerms(diagnosticText):
-      if term in relevantText:
-        inc overlap
-    candidateEvidence = %*{"name": candidateOverride{"name"}.getStr(""), "domain": domain, "overlap": overlap, "dsl_valid": true}
+    candidateEvidence = %*{
+      "name": candidateOverride{"name"}.getStr(""),
+      "domain": candidateOverride{"domain"}.getStr("general"),
+      "dsl_valid": true
+    }
   try:
     case operation
     of "math":
@@ -308,10 +304,15 @@ proc runDiagnosticRolloutCase(tenantId: string, diagnostic: Row, candidateOverri
       if hits.len > 0:
         sigma["progress"] = %1.0
       operationResult = %*{"ok": hits.len > 0, "hits": hits.len}
+      observed = %*{"memory_hits": hits.len}
     else:
       operationResult = %*{"ok": false, "error": "unsupported diagnostic operation"}
     let verified = verifyDiagnosticSnapshot(sandboxTenant, expectation, sigma)
-    let candidateOk = candidateOverride.isNil or candidateOverride.kind != JObject or candidateEvidence{"dsl_valid"}.getBool(false)
+    var candidateOk = candidateOverride.isNil or candidateOverride.kind != JObject
+    if not candidateOk:
+      let sandboxResult = await runGateSandbox(candidateOverride{"skill_code"}.getStr(""), spec, expectation, observed)
+      candidateOk = sandboxResult{"passed"}.getBool(false)
+      candidateEvidence["sandbox"] = sandboxResult
     return %*{"passed": verified[0] and candidateOk, "domain": diagnostic.getStr("domain"), "operation": operationResult, "verification": verified[1], "state": sigma, "candidate_evaluated": not candidateOverride.isNil, "candidate_evidence": candidateEvidence}
   finally:
     try:
@@ -502,7 +503,7 @@ proc consolidateKnowledgeOnce() {.async.} =
   let body = node{"body"}.getStr("").strip()
   if slug.len == 0 or body.len == 0:
     return
-  discard commitKnowledgeDoc(tenantId, slug, node{"category"}.getStr("operational"), body)
+  discard await commitKnowledgeDoc(tenantId, slug, node{"category"}.getStr("operational"), body)
   discard await metaAgent.consider(tenantId)
 
 proc knowledgeConsolidationLoop() {.async.} =

@@ -6,6 +6,7 @@ type
     errorText: string
     closed: bool
     readerStarted: bool
+    frameWriting: bool
 
 var ptyWebSockets = initTable[string, PtyWebSocket]()
 
@@ -32,24 +33,34 @@ proc ptyReadExact(ws: PtyWebSocket, size: int): Future[string] {.async.} =
     result.add(chunk)
 
 proc ptySendFrame(ws: PtyWebSocket, payload: string, opcode: int): Future[void] {.async.} =
-  let mask = hexBytes(sha1Hex(newId("pty") & payload & $nowF())[0 .. 7])
-  var frame = newStringOfCap(payload.len + 16)
-  frame.appendByte(0x80 or (opcode and 0x0f))
-  if payload.len < 126:
-    frame.appendByte(0x80 or payload.len)
-  elif payload.len <= 0xffff:
-    frame.appendByte(0x80 or 126)
-    frame.appendByte(payload.len shr 8)
-    frame.appendByte(payload.len)
-  else:
-    frame.appendByte(0x80 or 127)
-    var length = uint64(payload.len)
-    for shift in countdown(56, 0, 8):
-      frame.appendByte(int((length shr shift) and 0xff'u64))
-  frame.add(mask)
-  for index, ch in payload:
-    frame.add(char(ord(ch) xor ord(mask[index mod 4])))
-  await ws.socket.send(frame)
+  if opcode >= 8 and payload.len > 125:
+    raise newException(ValueError, "websocket control frame exceeds 125 bytes")
+  while ws.frameWriting and not ws.closed:
+    await sleepAsync(5)
+  if ws.closed:
+    raise newException(IOError, "PTY websocket is closed")
+  ws.frameWriting = true
+  try:
+    let mask = hexBytes(sha1Hex(newId("pty") & payload & $nowF())[0 .. 7])
+    var frame = newStringOfCap(payload.len + 16)
+    frame.appendByte(0x80 or (opcode and 0x0f))
+    if payload.len < 126:
+      frame.appendByte(0x80 or payload.len)
+    elif payload.len <= 0xffff:
+      frame.appendByte(0x80 or 126)
+      frame.appendByte(payload.len shr 8)
+      frame.appendByte(payload.len)
+    else:
+      frame.appendByte(0x80 or 127)
+      var length = uint64(payload.len)
+      for shift in countdown(56, 0, 8):
+        frame.appendByte(int((length shr shift) and 0xff'u64))
+    frame.add(mask)
+    for index, ch in payload:
+      frame.add(char(ord(ch) xor ord(mask[index mod 4])))
+    await ws.socket.send(frame)
+  finally:
+    ws.frameWriting = false
 
 proc ptyReadLoop(ws: PtyWebSocket) {.async.} =
   try:
@@ -57,8 +68,13 @@ proc ptyReadLoop(ws: PtyWebSocket) {.async.} =
       let header = await ptyReadExact(ws, 2)
       let first = ord(header[0])
       let second = ord(header[1])
+      if (first and 0x70) != 0:
+        raise newException(IOError, "PTY websocket has unsupported reserved bits")
       let opcode = first and 0x0f
+      let finalFrame = (first and 0x80) != 0
       let masked = (second and 0x80) != 0
+      if masked:
+        raise newException(IOError, "PTY websocket server frame must not be masked")
       var length = second and 0x7f
       if length == 126:
         let extended = await ptyReadExact(ws, 2)
@@ -71,17 +87,19 @@ proc ptyReadLoop(ws: PtyWebSocket) {.async.} =
         if length64 > uint64(16 * 1024 * 1024):
           raise newException(IOError, "PTY websocket frame exceeds size limit")
         length = int(length64)
-      var mask = ""
-      if masked:
-        mask = await ptyReadExact(ws, 4)
+      if opcode >= 8 and (not finalFrame or length > 125):
+        raise newException(IOError, "invalid PTY websocket control frame")
       var payload = await ptyReadExact(ws, length)
-      if masked:
-        for index in 0 ..< payload.len:
-          payload[index] = char(ord(payload[index]) xor ord(mask[index mod 4]))
       case opcode
       of 0, 1, 2:
+        if ws.output.len + payload.len > 16 * 1024 * 1024:
+          raise newException(IOError, "PTY websocket output exceeds size limit")
         ws.output.add(payload)
       of 8:
+        try:
+          await ptySendFrame(ws, payload, 8)
+        except CatchableError:
+          discard
         ws.closed = true
       of 9:
         await ptySendFrame(ws, payload, 10)
@@ -96,7 +114,6 @@ proc ptyHandshake(ws: PtyWebSocket): Future[void] {.async.} =
   let parsed = parseUri(ws.url)
   if parsed.scheme.toLowerAscii() notin ["ws", "wss"] or parsed.hostname.len == 0:
     raise newException(ValueError, "invalid PTY websocket URL")
-  let port = if parsed.port.len > 0: Port(parseInt(parsed.port)) else: Port(if parsed.scheme.toLowerAscii() == "wss": 443 else: 80)
   let path = if parsed.path.len > 0: parsed.path else: "/"
   let target = if parsed.query.len > 0: path & "?" & parsed.query else: path
   let key = base64.encode(hexBytes(sha1Hex(newId("pty-handshake"))[0 .. 31]))
@@ -138,7 +155,7 @@ proc openPtyWebSocket(taskId, url: string): Future[PtyWebSocket] {.async.} =
       existing.socket.close()
     ptyWebSockets.del(taskId)
   let parsed = parseUri(url)
-  let ws = PtyWebSocket(socket: newAsyncSocket(buffered = false), url: url, output: "", errorText: "", closed: false, readerStarted: false)
+  let ws = PtyWebSocket(socket: newAsyncSocket(buffered = false), url: url, output: "", errorText: "", closed: false, readerStarted: false, frameWriting: false)
   if parsed.scheme.toLowerAscii() == "wss":
     let context = newContext(verifyMode = CVerifyPeer)
     context.wrapSocket(ws.socket)

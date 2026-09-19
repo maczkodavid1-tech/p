@@ -1,3 +1,5 @@
 - [Nim runtime startup](nim-runtime-startup.md) — this service needs SQLite available and Nim threads disabled in the preview workflow.
 - [Gemini Interactions input](gemini-interactions-input.md) — Gemini conversation inputs must use typed user/model steps with nested content parts.
 - [FlyMyAI image generation](flymyai-image-generation.md) — configure the host-root base URL; the client appends the versioned prediction path.
+- [Nim generated Python](nim-generated-python.md) — use single-quoted Python literals inside Nim-built scripts to avoid ambiguous doubled-quote parsing.
+- [PTY WebSocket lifecycle](pty-websocket-lifecycle.md) — serialize frame writes cooperatively and enforce protocol/output limits on the persistent client.
