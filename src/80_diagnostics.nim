@@ -1,3 +1,8 @@
+type
+  DslInstruction = object
+    keyword: string
+    value: string
+
 proc removeTree(path: string) =
   if not dirExists(path):
     return
@@ -106,6 +111,153 @@ proc validateSkillDsl(code: string): (bool, seq[string])
 proc diagnosticAllowedTools(tenantId: string): HashSet[string] =
   allowedToolsForTenant(tenantId)
 
+proc gatePythonProgram(skillCode: string, spec, expectation: JsonNode, observed: JsonNode): string =
+  let code64 = base64.encode(skillCode)
+  let spec64 = base64.encode(canonical(spec))
+  let expectation64 = base64.encode(canonical(expectation))
+  let observed64 = base64.encode(canonical(observed))
+  result = "import ast,base64,json,math,os,pathlib,sys\n" &
+    "dsl=base64.b64decode(" & escapeJson(code64) & ").decode()\n" &
+    "spec=json.loads(base64.b64decode(" & escapeJson(spec64) & "))\n" &
+    "expectation=json.loads(base64.b64decode(" & escapeJson(expectation64) & "))\n" &
+    "observed=json.loads(base64.b64decode(" & escapeJson(observed64) & "))\n" &
+    "root=(pathlib.Path.cwd()/""validation_sandbox"").resolve()\n" &
+    "root.mkdir(parents=True,exist_ok=True)\n" &
+    "state={""facts"":{},""progress"":0.0,""subgoals"":[],""blockers"":[]}\n" &
+    "errors=[]\n" &
+    "trace=[]\n" &
+    "operation_result={}\n" &
+    "operation_done=False\n" &
+    "def safe_path(rel):\n" &
+    " p=(root/rel).resolve()\n" &
+    " if root not in p.parents: raise RuntimeError(""path escapes sandbox"")\n" &
+    " return p\n" &
+    "def eval_math(node):\n" &
+    " if isinstance(node,ast.Expression): return eval_math(node.body)\n" &
+    " if isinstance(node,ast.Constant) and isinstance(node.value,(int,float)): return node.value\n" &
+    " if isinstance(node,ast.UnaryOp):\n" &
+    "  value=eval_math(node.operand)\n" &
+    "  if isinstance(node.op,ast.UAdd): return value\n" &
+    "  if isinstance(node.op,ast.USub): return -value\n" &
+    " if isinstance(node,ast.BinOp):\n" &
+    "  left=eval_math(node.left); right=eval_math(node.right)\n" &
+    "  if isinstance(node.op,ast.Add): return left+right\n" &
+    "  if isinstance(node.op,ast.Sub): return left-right\n" &
+    "  if isinstance(node.op,ast.Mult): return left*right\n" &
+    "  if isinstance(node.op,ast.Div): return left/right\n" &
+    "  if isinstance(node.op,ast.Mod): return left%right\n" &
+    "  if isinstance(node.op,ast.Pow): return left**right\n" &
+    " raise RuntimeError(""unsupported expression"")\n" &
+    "def execute_operation():\n" &
+    " global operation_done,operation_result\n" &
+    " if operation_done: return\n" &
+    " operation=spec.get(""operation"",'''')\n" &
+    " if operation==""math"":\n" &
+    "  value=eval_math(ast.parse(spec.get(""expression"",''''),mode=''eval''))\n" &
+    "  state[""facts""][""answer""]=value; state[""progress""]=1.0\n" &
+    "  operation_result={""ok"":True,""value"":value}\n" &
+    " elif operation==""file"":\n" &
+    "  target=safe_path(spec.get(""path"",'''')); content=spec.get(""content"",'''')\n" &
+    "  target.parent.mkdir(parents=True,exist_ok=True); target.write_text(content)\n" &
+    "  actual=target.read_text(); ok=target.is_file() and actual==content\n" &
+    "  state[""progress""]=1.0 if ok else 0.0\n" &
+    "  operation_result={""ok"":ok,""path"":spec.get(""path"",''''),""output"":actual}\n" &
+    " elif operation==""memory"":\n" &
+    "  hits=int(observed.get(""memory_hits"",0)); state[""facts""][""memory_routed""]=hits>0\n" &
+    "  state[""progress""]=1.0 if hits>0 else 0.0\n" &
+    "  operation_result={""ok"":hits>0,""hits"":hits,""query"":spec.get(""query"",'''')}\n" &
+    " else: raise RuntimeError(""unsupported diagnostic operation"")\n" &
+    " operation_done=True\n" &
+    "def verify_expectations():\n" &
+    " verifiers=expectation.get(""verifiers"",expectation if isinstance(expectation,list) else [])\n" &
+    " if not verifiers: raise RuntimeError(""diagnostic has no verifiers"")\n" &
+    " for verifier in verifiers:\n" &
+    "  kind=verifier.get(""type"",'''')\n" &
+    "  if kind==""state_path_equals"":\n" &
+    "   current=state\n" &
+    "   for part in verifier.get(""path"",'''').strip(""/"").split(""/""):\n" &
+    "    current=current.get(part) if isinstance(current,dict) else None\n" &
+    "   if current!=verifier.get(""expected""): raise RuntimeError(""state verification failed: ""+verifier.get(""path"",''''))\n" &
+    "  elif kind==""file_exists"":\n" &
+    "   if not safe_path(verifier.get(""path"",'''')).is_file(): raise RuntimeError(""file existence verification failed"")\n" &
+    "  elif kind==""file_contains"":\n" &
+    "   target=safe_path(verifier.get(""path"",''''))\n" &
+    "   if not target.is_file() or verifier.get(""needle"",'''') not in target.read_text(): raise RuntimeError(""file content verification failed"")\n" &
+    "  elif kind==""all_subgoals_resolved"":\n" &
+    "   if any(item.get(""status"") in (""open"",""in_progress"",""queued"",""running"") for item in state.get(""subgoals"",[])): raise RuntimeError(""subgoals remain unresolved"")\n" &
+    "  elif kind==""no_blockers"":\n" &
+    "   if state.get(""blockers""): raise RuntimeError(""blockers remain"")\n" &
+    "  else: raise RuntimeError(""unsupported diagnostic verifier"")\n" &
+    "context={""completion_criteria"":bool(expectation.get(""verifiers"",[])),""actual_file_state"":False,""real_runtime_output"":False,""browser_session"":False,""image_generate_tool"":False}\n" &
+    "def run_instruction(keyword,value):\n" &
+    " if keyword==""WHEN"":\n" &
+    "  if not value: raise RuntimeError(""empty trigger"")\n" &
+    " elif keyword==""REQUIRE"":\n" &
+    "  if not context.get(value,False): raise RuntimeError(""required runtime capability unavailable: ""+value)\n" &
+    " elif keyword==""STEP"":\n" &
+    "  if value in (""inspect"",""observe"",""diagnose"",""execute"",""modify"",""interact"",""repair"",""rerun""):\n" &
+    "   execute_operation(); context[""actual_file_state""]=bool(operation_result.get(""ok"")); context[""real_runtime_output""]=bool(operation_result)\n" &
+    "  else: raise RuntimeError(""unsupported executable DSL step: ""+value)\n" &
+    " elif keyword==""VERIFY"":\n" &
+    "  if value not in (""reread_or_execute"",""completion_criteria_satisfied"",""zero_errors_remaining"",""requested_behavior"",""target_state"",""artifact_exists""):\n" &
+    "   raise RuntimeError(""unsupported executable DSL verifier: ""+value)\n" &
+    "  execute_operation(); verify_expectations()\n" &
+    " elif keyword==""RECOVER"":\n" &
+    "  trace.append({""recover"":value})\n" &
+    "try:\n" &
+    " for raw in dsl.splitlines():\n" &
+    "  line=raw.strip()\n" &
+    "  if line:\n" &
+    "   parts=line.split(None,1)\n" &
+    "   run_instruction(parts[0].upper(),parts[1].strip() if len(parts)>1 else '''')\n" &
+    "except Exception as error:\n" &
+    " errors.append(str(error))\n" &
+    "print(json.dumps({""passed"":not errors,""operation"":operation_result,""state"":state,""trace"":trace,""errors"":errors},separators=(',',':')))\n"
+
+proc runGateSandbox(skillCode: string, spec, expectation: JsonNode, observed: JsonNode): Future[JsonNode] {.async.} =
+  let createBody = %*{
+    "api_key": requireEnv("INSTAVM_API_KEY"),
+    "vm_lifetime_seconds": 900,
+    "memory_mb": VmDefaultMemoryMb,
+    "vcpu_count": VmDefaultVcpuCount,
+    "metadata": {"purpose": "validation_gate"},
+    "env": newJObject(),
+    "prewarm": false
+  }
+  let (createStatus, createRaw, _) = await httpRequestAsync(InstaVmBaseUrl & "/v1/sessions/session", HttpPost, $createBody, instavmHeaders())
+  if createStatus < 200 or createStatus >= 300:
+    return %*{"passed": false, "error": "sandbox VM creation failed", "status": createStatus, "body": createRaw}
+  var sessionId = ""
+  try:
+    let session = parseJson(createRaw)
+    sessionId = session{"session_id"}.getStr(session{"id"}.getStr(""))
+    if sessionId.len == 0:
+      return %*{"passed": false, "error": "sandbox VM response has no session id"}
+    let body = %*{
+      "command": gatePythonProgram(skillCode, spec, expectation, observed),
+      "session_id": sessionId,
+      "language": "python"
+    }
+    let (status, raw, _) = await httpRequestAsync(InstaVmBaseUrl & "/execute", HttpPost, $body, instavmHeaders())
+    if status < 200 or status >= 300:
+      return %*{"passed": false, "error": "sandbox test execution failed", "status": status, "body": raw}
+    let response = parseJson(raw)
+    let output = response{"output"}.getStr(response{"stdout"}.getStr(""))
+    var lines = output.splitLines()
+    while lines.len > 0 and lines[^1].strip().len == 0:
+      lines.setLen(lines.len - 1)
+    if lines.len == 0:
+      return %*{"passed": false, "error": "sandbox test produced no JSON output", "response": response}
+    try:
+      return parseJson(lines[^1])
+    except CatchableError:
+      return %*{"passed": false, "error": "sandbox test produced invalid JSON output", "response": response}
+  except CatchableError as e:
+    return %*{"passed": false, "error": e.msg}
+  finally:
+    if sessionId.len > 0:
+      discard await httpRequestAsync(InstaVmBaseUrl & "/v1/sessions/" & encodeUrl(sessionId), HttpDelete, "", instavmHeaders())
+
 proc runDiagnosticRolloutCase(tenantId: string, diagnostic: Row, candidateOverride: JsonNode = nil): Future[JsonNode] {.async.} =
   let spec = diagnostic.getJson("spec_json")
   let expectation = diagnostic.getJson("expectation_json")
@@ -151,7 +303,7 @@ proc runDiagnosticRolloutCase(tenantId: string, diagnostic: Row, candidateOverri
       operationResult = %*{"ok": verified, "path": rel, "sha1": sha1Hex(content)}
     of "memory":
       let query = spec{"query"}.getStr("file operations")
-      let hits = searchSkills(tenantId, query, 5)
+      let hits = await searchSkills(tenantId, query, 5)
       sigma["facts"]["memory_routed"] = %(hits.len > 0)
       if hits.len > 0:
         sigma["progress"] = %1.0
@@ -270,7 +422,7 @@ proc validateAndActivate(gate: ValidationGate, tenantId: string, candidate: Json
     let preconditions = if candidate.hasKey("preconditions") and candidate["preconditions"].kind == JArray: canonical(candidate["preconditions"]) else: "[]"
     let postconditions = if candidate.hasKey("postconditions") and candidate["postconditions"].kind == JArray: canonical(candidate["postconditions"]) else: "[]"
     let failureModes = if candidate.hasKey("failure_modes") and candidate["failure_modes"].kind == JArray: canonical(candidate["failure_modes"]) else: "[]"
-    let embedding = embToJson(textEmbedding(name & " " & domain & " " & trigger & " " & procedure & " " & skillCode))
+    let embedding = embToJson(await textEmbedding(name & " " & domain & " " & trigger & " " & procedure & " " & skillCode))
     let existing = store.query("SELECT skill_id FROM skills WHERE tenant_id=? AND name=?", @[%tenantId, %name])
     let ts = nowF()
     var skillId = ""
@@ -320,9 +472,9 @@ proc consider(agent: MetaAgent, tenantId: string, sourceTaskId: string = ""): Fu
     decisions.add(%*{"signature": signature, "status": status, "candidate": (if candidate.isNil: newJObject() else: candidate), "validation": validation})
   return %*{"tenant_id": tenantId, "decisions": decisions, "considered": groups.len}
 
-proc upsertSeed(name, domain, trigger, procedure, skillCode: string) =
+proc upsertSeed(name, domain, trigger, procedure, skillCode: string): Future[void] {.async.} =
   let existing = store.query("SELECT skill_id FROM skills WHERE tenant_id=? AND name=?", @[%defaultTenantId, %name])
-  let embedding = embToJson(textEmbedding(name & " " & domain & " " & trigger & " " & procedure & " " & skillCode))
+  let embedding = embToJson(await textEmbedding(name & " " & domain & " " & trigger & " " & procedure & " " & skillCode))
   let ts = nowF()
   if existing.len > 0:
     discard store.exec("UPDATE skills SET domain=?,trigger_spec=?,procedure_spec=?,skill_code=?,embedding_json=?,active=1,updated_at=? WHERE skill_id=?",

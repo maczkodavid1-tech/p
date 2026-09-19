@@ -1,3 +1,168 @@
+type
+  PtyWebSocket = ref object
+    socket: AsyncSocket
+    url: string
+    output: string
+    errorText: string
+    closed: bool
+    readerStarted: bool
+
+var ptyWebSockets = initTable[string, PtyWebSocket]()
+
+proc hexBytes(value: string): string =
+  if value.len mod 2 != 0:
+    raise newException(ValueError, "hex value must have an even length")
+  result = newStringOfCap(value.len div 2)
+  var index = 0
+  while index < value.len:
+    result.add(char(parseHexInt(value[index ..< index + 2])))
+    inc index, 2
+
+proc appendByte(value: var string, number: int) =
+  value.add(char(number and 0xff))
+
+proc ptyReadExact(ws: PtyWebSocket, size: int): Future[string] {.async.} =
+  if size < 0 or size > 16 * 1024 * 1024:
+    raise newException(IOError, "invalid websocket frame size")
+  result = newStringOfCap(size)
+  while result.len < size:
+    let chunk = await ws.socket.recv(min(8192, size - result.len))
+    if chunk.len == 0:
+      raise newException(IOError, "PTY websocket closed")
+    result.add(chunk)
+
+proc ptySendFrame(ws: PtyWebSocket, payload: string, opcode: int): Future[void] {.async.} =
+  let mask = hexBytes(sha1Hex(newId("pty") & payload & $nowF())[0 .. 7])
+  var frame = newStringOfCap(payload.len + 16)
+  frame.appendByte(0x80 or (opcode and 0x0f))
+  if payload.len < 126:
+    frame.appendByte(0x80 or payload.len)
+  elif payload.len <= 0xffff:
+    frame.appendByte(0x80 or 126)
+    frame.appendByte(payload.len shr 8)
+    frame.appendByte(payload.len)
+  else:
+    frame.appendByte(0x80 or 127)
+    var length = uint64(payload.len)
+    for shift in countdown(56, 0, 8):
+      frame.appendByte(int((length shr shift) and 0xff'u64))
+  frame.add(mask)
+  for index, ch in payload:
+    frame.add(char(ord(ch) xor ord(mask[index mod 4])))
+  await ws.socket.send(frame)
+
+proc ptyReadLoop(ws: PtyWebSocket) {.async.} =
+  try:
+    while not ws.closed:
+      let header = await ptyReadExact(ws, 2)
+      let first = ord(header[0])
+      let second = ord(header[1])
+      let opcode = first and 0x0f
+      let masked = (second and 0x80) != 0
+      var length = second and 0x7f
+      if length == 126:
+        let extended = await ptyReadExact(ws, 2)
+        length = (ord(extended[0]) shl 8) or ord(extended[1])
+      elif length == 127:
+        let extended = await ptyReadExact(ws, 8)
+        var length64 = 0'u64
+        for ch in extended:
+          length64 = (length64 shl 8) or uint64(ord(ch))
+        if length64 > uint64(16 * 1024 * 1024):
+          raise newException(IOError, "PTY websocket frame exceeds size limit")
+        length = int(length64)
+      var mask = ""
+      if masked:
+        mask = await ptyReadExact(ws, 4)
+      var payload = await ptyReadExact(ws, length)
+      if masked:
+        for index in 0 ..< payload.len:
+          payload[index] = char(ord(payload[index]) xor ord(mask[index mod 4]))
+      case opcode
+      of 0, 1, 2:
+        ws.output.add(payload)
+      of 8:
+        ws.closed = true
+      of 9:
+        await ptySendFrame(ws, payload, 10)
+      else:
+        discard
+  except CatchableError as e:
+    if not ws.closed:
+      ws.errorText = e.msg
+    ws.closed = true
+
+proc ptyHandshake(ws: PtyWebSocket): Future[void] {.async.} =
+  let parsed = parseUri(ws.url)
+  if parsed.scheme.toLowerAscii() notin ["ws", "wss"] or parsed.hostname.len == 0:
+    raise newException(ValueError, "invalid PTY websocket URL")
+  let port = if parsed.port.len > 0: Port(parseInt(parsed.port)) else: Port(if parsed.scheme.toLowerAscii() == "wss": 443 else: 80)
+  let path = if parsed.path.len > 0: parsed.path else: "/"
+  let target = if parsed.query.len > 0: path & "?" & parsed.query else: path
+  let key = base64.encode(hexBytes(sha1Hex(newId("pty-handshake"))[0 .. 31]))
+  let hostHeader = if parsed.port.len > 0: parsed.hostname & ":" & parsed.port else: parsed.hostname
+  let request = "GET " & target & " HTTP/1.1\r\n" &
+    "Host: " & hostHeader & "\r\n" &
+    "Upgrade: websocket\r\n" &
+    "Connection: Upgrade\r\n" &
+    "Sec-WebSocket-Key: " & key & "\r\n" &
+    "Sec-WebSocket-Version: 13\r\n" &
+    "X-API-Key: " & requireEnv("INSTAVM_API_KEY") & "\r\n\r\n"
+  await ws.socket.send(request)
+  var response = ""
+  while not response.endsWith("\r\n\r\n"):
+    let chunk = await ws.socket.recv(1)
+    if chunk.len == 0:
+      raise newException(IOError, "PTY websocket handshake closed")
+    response.add(chunk)
+    if response.len > 65536:
+      raise newException(IOError, "PTY websocket handshake exceeded size limit")
+  let lines = response.split("\r\n")
+  if lines.len == 0 or " 101 " notin lines[0]:
+    raise newException(IOError, "PTY websocket handshake failed: " & (if lines.len > 0: lines[0] else: "empty response"))
+  var acceptValue = ""
+  for line in lines:
+    let separator = line.find(':')
+    if separator > 0 and line[0 ..< separator].toLowerAscii() == "sec-websocket-accept":
+      acceptValue = line[separator + 1 .. ^1].strip()
+  let expected = base64.encode(hexBytes(sha1Hex(key & "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")))
+  if acceptValue != expected:
+    raise newException(IOError, "PTY websocket accept header mismatch")
+
+proc openPtyWebSocket(taskId, url: string): Future[PtyWebSocket] {.async.} =
+  if ptyWebSockets.hasKey(taskId):
+    let existing = ptyWebSockets[taskId]
+    if not existing.closed and existing.url == url:
+      return existing
+    if not existing.socket.isNil:
+      existing.socket.close()
+    ptyWebSockets.del(taskId)
+  let parsed = parseUri(url)
+  let ws = PtyWebSocket(socket: newAsyncSocket(buffered = false), url: url, output: "", errorText: "", closed: false, readerStarted: false)
+  if parsed.scheme.toLowerAscii() == "wss":
+    let context = newContext(verifyMode = CVerifyPeer)
+    context.wrapSocket(ws.socket)
+  let port = if parsed.port.len > 0: Port(parseInt(parsed.port)) else: Port(if parsed.scheme.toLowerAscii() == "wss": 443 else: 80)
+  try:
+    await ws.socket.connect(parsed.hostname, port)
+    await ws.ptyHandshake()
+    ptyWebSockets[taskId] = ws
+    ws.readerStarted = true
+    asyncCheck ptyReadLoop(ws)
+    return ws
+  except CatchableError:
+    ws.socket.close()
+    raise
+
+proc closePtyWebSocket(taskId: string) =
+  if not ptyWebSockets.hasKey(taskId):
+    return
+  let ws = ptyWebSockets[taskId]
+  ws.closed = true
+  if not ws.socket.isNil:
+    ws.socket.close()
+  ptyWebSockets.del(taskId)
+
 proc registerTools() =
   registerTool("spawn_subagent", "Create and immediately launch a persistent autonomous child agent using any configured model, with the child model and goal explicitly chosen by the caller model. Give every child agent the complete tool registry and allow it to recursively create its own children.", %*{"model": "string", "goal": "string", "name": "string optional", "instructions": "string optional", "context": "object optional", "wait": "bool optional"},
     proc(h: TaskHandle, args: JsonNode): Future[ToolResult] {.async.} =
@@ -379,94 +544,28 @@ print(json.dumps({'path':str(p),'extension':ext,'text':text},ensure_ascii=False)
         return ToolResult(ok: false, payload: %*{"session_id": sid, "pty_id": ptyId}, receipt: "", message: "PTY websocket URL is not present in the PTY session response")
       let stdinText = args{"input"}.getStr("")
       let readSeconds = max(0.05, args{"read_seconds"}.getFloat(0.35))
-      let helper = """import base64,hashlib,json,os,select,socket,ssl,struct,sys,time
-from urllib.parse import urlsplit
-def recv_exact(sock,n):
- out=b''
- while len(out)<n:
-  chunk=sock.recv(n-len(out))
-  if not chunk: raise EOFError('websocket closed')
-  out+=chunk
- return out
-def recv_frame(sock):
- h=recv_exact(sock,2)
- opcode=h[0]&15
- masked=(h[1]&128)!=0
- n=h[1]&127
- if n==126:n=struct.unpack('!H',recv_exact(sock,2))[0]
- elif n==127:n=struct.unpack('!Q',recv_exact(sock,8))[0]
- mask=recv_exact(sock,4) if masked else b''
- data=recv_exact(sock,n) if n else b''
- if masked:data=bytes(b^mask[i%4] for i,b in enumerate(data))
- return opcode,data
-def send_frame(sock,data,opcode=2):
- first=128|opcode
- n=len(data)
- if n<126:head=bytes([first,128|n])
- elif n<65536:head=bytes([first,128|126])+struct.pack('!H',n)
- else:head=bytes([first,128|127])+struct.pack('!Q',n)
- mask=os.urandom(4)
- body=bytes(b^mask[i%4] for i,b in enumerate(data))
- sock.sendall(head+mask+body)
-u=urlsplit(sys.argv[1])
-host=u.hostname
-port=u.port or (443 if u.scheme=='wss' else 80)
-path=u.path or '/'
-if u.query:path+='?'+u.query
-sock=socket.create_connection((host,port),timeout=20)
-if u.scheme=='wss':sock=ssl.create_default_context().wrap_socket(sock,server_hostname=host)
-wskey=base64.b64encode(os.urandom(16)).decode()
-host_header=host if port in (80,443) else host+':'+str(port)
-request=('GET '+path+' HTTP/1.1\r\nHost: '+host_header+'\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: '+wskey+'\r\nSec-WebSocket-Version: 13\r\nX-API-Key: '+sys.argv[2]+'\r\n\r\n').encode()
-sock.sendall(request)
-head=b''
-while not head.endswith(b'\r\n\r\n'):
- b=sock.recv(1)
- if not b:raise RuntimeError('websocket handshake closed')
- head+=b
- if len(head)>65536:raise RuntimeError('websocket handshake too large')
-lines=head.decode('latin1').split('\r\n')
-if ' 101 ' not in lines[0]:raise RuntimeError('websocket handshake failed: '+lines[0])
-headers={}
-for line in lines[1:]:
- if ':' in line:
-  k,v=line.split(':',1);headers[k.strip().lower()]=v.strip()
-expected=base64.b64encode(hashlib.sha1((wskey+'258EAFA5-E914-47DA-95CA-C5AB0DC85B11').encode()).digest()).decode()
-if headers.get('sec-websocket-accept')!=expected:raise RuntimeError('invalid websocket accept')
-data=base64.b64decode(sys.argv[3])
-wait=float(sys.argv[4])
-send_frame(sock,data,2)
-chunks=[]
-deadline=time.monotonic()+wait
-while True:
- remaining=deadline-time.monotonic()
- if remaining<=0:break
- ready,_,_=select.select([sock],[],[],remaining)
- if not ready:break
- opcode,payload=recv_frame(sock)
- if opcode==8:break
- if opcode==9:
-  send_frame(sock,payload,10);continue
- if opcode==2:chunks.append(payload);continue
- if opcode==1:
-  try:
-   event=json.loads(payload.decode())
-   if event.get('type')=='exit':break
-  except Exception:chunks.append(payload)
-try:send_frame(sock,b'',8)
-except Exception:pass
-sock.close()
-print(base64.b64encode(b''.join(chunks)).decode())"""
-      let command = "python3 -c " & shellQuote(helper) & " " & shellQuote(wsUrl) & " " & shellQuote(requireEnv("INSTAVM_API_KEY")) & " " & shellQuote(base64.encode(stdinText)) & " " & shellQuote($readSeconds)
-      let local = execCmdEx(command)
-      if local.exitCode != 0:
-        return ToolResult(ok: false, payload: %*{"output": local.output}, receipt: "pty:error", message: local.output)
-      var decoded = ""
+      var ws: PtyWebSocket
       try:
-        decoded = base64.decode(local.output.strip())
+        ws = await openPtyWebSocket(h.taskId, wsUrl)
+        if ws.closed:
+          return ToolResult(ok: false, payload: %*{"session_id": sid, "pty_id": ptyId}, receipt: "pty:error", message: ws.errorText)
+        let previousOutput = ws.output
+        ws.output.setLen(0)
+        if stdinText.len > 0:
+          await ptySendFrame(ws, stdinText, 2)
+        let deadline = epochTime() + readSeconds
+        while epochTime() < deadline and not ws.closed:
+          await sleepAsync(10)
+        if ws.errorText.len > 0 and ws.output.len == 0:
+          return ToolResult(ok: false, payload: %*{"session_id": sid, "pty_id": ptyId, "output": previousOutput}, receipt: "pty:error", message: ws.errorText)
+        return ToolResult(ok: true, payload: %*{"session_id": sid, "pty_id": ptyId, "output": ws.output}, receipt: "pty:" & sha1Hex(stdinText & ws.output), message: "PTY input written")
       except CatchableError as e:
-        return ToolResult(ok: false, payload: %*{"output": local.output}, receipt: "pty:error", message: e.msg)
-      return ToolResult(ok: true, payload: %*{"session_id": sid, "pty_id": ptyId, "output": decoded}, receipt: "pty:" & sha1Hex(stdinText & decoded), message: "PTY input written"))
+        if not ws.isNil and not ws.socket.isNil:
+          ws.closed = true
+          ws.socket.close()
+        if ptyWebSockets.hasKey(h.taskId):
+          ptyWebSockets.del(h.taskId)
+        return ToolResult(ok: false, payload: %*{"session_id": sid, "pty_id": ptyId}, receipt: "pty:error", message: e.msg))
   registerTool("vm_pty_resize", "Resize the persistent InstaVM PTY.", %*{"cols": "int", "rows": "int"},
     proc(h: TaskHandle, args: JsonNode): Future[ToolResult] {.async.} =
       let rt = h.runtimeNode()
@@ -484,6 +583,7 @@ print(base64.b64encode(b''.join(chunks)).decode())"""
         return ToolResult(ok: false, payload: newJObject(), receipt: "", message: "PTY not created")
       let res = await h.instavmJson("/v1/sessions/" & encodeUrl(sid) & "/pty/sessions/" & encodeUrl(ptyId), HttpDelete)
       if res.ok:
+        closePtyWebSocket(h.taskId)
         h.saveRuntimeField("pty_id", "")
         h.saveRuntimeField("pty_ws_url", "")
       return res)
@@ -493,10 +593,10 @@ print(base64.b64encode(b''.join(chunks)).decode())"""
       let limit = max(1, args{"limit"}.getInt(8))
       let tenant = if h.tenantId.len > 0: h.tenantId else: defaultTenantId
       var skills = newJArray()
-      for r in searchSkills(tenant, q, limit):
+      for r in await searchSkills(tenant, q, limit):
         skills.add(%*{"skill_id": r.getStr("skill_id"), "name": r.getStr("name"), "domain": r.getStr("domain"), "trigger": r.getStr("trigger_spec"), "procedure": r.getStr("procedure_spec"), "skill_code": r.getStr("skill_code"), "reward": r.getFloat("reward")})
       var docs = newJArray()
-      for r in searchKnowledge(tenant, q, limit):
+      for r in await searchKnowledge(tenant, q, limit):
         docs.add(%*{"doc_id": r.getStr("doc_id"), "slug": r.getStr("slug"), "category": r.getStr("category"), "content": r.getStr("content")})
       let policy = learnedPolicySignals(tenant, q, limit)
       return ToolResult(ok: true, payload: %*{"skills": skills, "knowledge": docs, "policy_signals": policy}, receipt: "memory:" & sha1Hex(tenant & ":" & q), message: "retrieved"))
@@ -509,7 +609,7 @@ print(base64.b64encode(b''.join(chunks)).decode())"""
       let category = args{"category"}.getStr("operational")
       let tenant = if h.tenantId.len > 0: h.tenantId else: defaultTenantId
       try:
-        let docId = commitKnowledgeDoc(tenant, slug, category, body)
+        let docId = await commitKnowledgeDoc(tenant, slug, category, body)
         let rows = store.query("SELECT path FROM knowledge_docs WHERE doc_id=? AND tenant_id=?", @[%docId, %tenant])
         let path = if rows.len > 0: rows[0].getStr("path") else: ""
         return ToolResult(ok: true, payload: %*{"doc_id": docId, "slug": slug, "path": path}, receipt: "knowledge:" & docId, message: "persisted")

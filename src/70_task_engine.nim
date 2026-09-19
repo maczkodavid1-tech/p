@@ -16,7 +16,7 @@ proc subAgentSystem(role: ModelRole): string =
     return core & "\n\n" & promptText("subagent_orchestrator")
   core & "\n\nMODEL SPECIALIZATION:\n" & specialistSystem(role)
 
-proc buildStepMessages(h: TaskHandle, step: JsonNode, role: ModelRole): JsonNode =
+proc buildStepMessages(h: TaskHandle, step: JsonNode, role: ModelRole): Future[JsonNode] {.async.} =
   acquire(h.lock)
   let sigma = copy(h.sigma)
   let obs = copy(h.obs)
@@ -25,9 +25,9 @@ proc buildStepMessages(h: TaskHandle, step: JsonNode, role: ModelRole): JsonNode
   let queryText = step{"goal"}.getStr("") & " " & sigma{"step_summary"}.getStr("") & " " & canonical(obs)
   let tenant = if h.tenantId.len > 0: h.tenantId else: defaultTenantId
   var memory = %*{"skills": newJArray(), "knowledge": newJArray(), "policy_signals": learnedPolicySignals(tenant, queryText, 12)}
-  for r in searchSkills(tenant, queryText, 8):
+  for r in await searchSkills(tenant, queryText, 8):
     memory["skills"].add(%*{"name": r.getStr("name"), "domain": r.getStr("domain"), "procedure": r.getStr("procedure_spec"), "skill_code": r.getStr("skill_code"), "reward": r.getFloat("reward")})
-  for r in searchKnowledge(tenant, queryText, 8):
+  for r in await searchKnowledge(tenant, queryText, 8):
     memory["knowledge"].add(%*{"slug": r.getStr("slug"), "category": r.getStr("category"), "content": r.getStr("content")})
   let userText = "TASK SPECIFICATION:\n" & canonical(spec) &
     "\n\nCURRENT AUTONOMOUS STATE:\n" & canonical(sigma) &
@@ -171,7 +171,7 @@ proc modelStep(h: TaskHandle, step: JsonNode): Future[(bool, string)] {.async.} 
   h.setStepStatus(stepId, "running")
   h.transitionOrchestrator(osAct)
   h.emit(%*{"type": "model_start", "model": modelRoleName(role), "provider": providerName(modelSpec(role).provider), "step_id": stepId})
-  let messages = h.buildStepMessages(step, role)
+  let messages = await h.buildStepMessages(step, role)
   let modelStarted = getMonoTime()
   let resp = await invokeModel(role, messages, role != mrGemini38, h.tenantId, h.taskId)
   let modelLatency = int((getMonoTime() - modelStarted).inMilliseconds)

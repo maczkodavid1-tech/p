@@ -21,7 +21,7 @@ proc contentTerms(s: string): seq[string] =
 
 proc positiveEnvInt(name: string, fallback: int): int
 
-proc textEmbedding(text: string, dims: int = EmbeddingDim): seq[float] =
+proc textEmbedding(text: string, dims: int = EmbeddingDim): Future[seq[float]] {.async.} =
   let input = text.strip()
   if input.len == 0:
     return @[]
@@ -30,8 +30,8 @@ proc textEmbedding(text: string, dims: int = EmbeddingDim): seq[float] =
     raise newException(IOError, "REQUESTY_API_KEY is required for semantic embeddings")
   let model = envTrim("EMBEDDING_MODEL", "openai/text-embedding-3-small")
   let baseUrl = stripTrailingSlash(if RequestyBaseUrl.len > 0: RequestyBaseUrl else: DefaultRequestyBaseUrl)
-  var client = newHttpClient(maxRedirects = 0, timeout = positiveEnvInt("EMBEDDING_HTTP_TIMEOUT_MS", 60000))
-  defer: client.close()
+  var client = newAsyncHttpClient(maxRedirects = 0)
+  client.timeout = positiveEnvInt("EMBEDDING_HTTP_TIMEOUT_MS", 60000)
   client.headers = newHttpHeaders({
     "Authorization": "Bearer " & key,
     "Content-Type": "application/json",
@@ -40,20 +40,24 @@ proc textEmbedding(text: string, dims: int = EmbeddingDim): seq[float] =
   var requestBody = %*{"model": model, "input": input}
   if dims > 0:
     requestBody["dimensions"] = %dims
-  let response = client.request(baseUrl & "/embeddings", httpMethod = HttpPost, body = $requestBody)
-  if response.code.int < 200 or response.code.int >= 300:
-    raise newException(IOError, "embedding provider status " & $response.code.int & ": " & response.body)
-  if response.body.len > positiveEnvInt("EMBEDDING_RESPONSE_MAX_BYTES", 8 * 1024 * 1024):
-    raise newException(IOError, "embedding response exceeded configured size limit")
-  let parsed = parseJson(response.body)
-  if parsed{"data"}.kind != JArray or parsed["data"].elems.len == 0 or parsed["data"][0]{"embedding"}.kind != JArray:
-    raise newException(IOError, "embedding provider returned no embedding vector")
-  for item in parsed["data"][0]["embedding"].elems:
-    if item.kind notin {JInt, JFloat}:
-      raise newException(IOError, "embedding provider returned a non-numeric embedding value")
-    result.add(item.getFloat())
-  if result.len == 0:
-    raise newException(IOError, "embedding provider returned an empty embedding vector")
+  try:
+    let response = await client.request(baseUrl & "/embeddings", httpMethod = HttpPost, body = $requestBody)
+    let responseBody = await response.body()
+    if response.code.int < 200 or response.code.int >= 300:
+      raise newException(IOError, "embedding provider status " & $response.code.int & ": " & responseBody)
+    if responseBody.len > positiveEnvInt("EMBEDDING_RESPONSE_MAX_BYTES", 8 * 1024 * 1024):
+      raise newException(IOError, "embedding response exceeded configured size limit")
+    let parsed = parseJson(responseBody)
+    if parsed{"data"}.kind != JArray or parsed["data"].elems.len == 0 or parsed["data"][0]{"embedding"}.kind != JArray:
+      raise newException(IOError, "embedding provider returned no embedding vector")
+    for item in parsed["data"][0]["embedding"].elems:
+      if item.kind notin {JInt, JFloat}:
+        raise newException(IOError, "embedding provider returned a non-numeric embedding value")
+      result.add(item.getFloat())
+    if result.len == 0:
+      raise newException(IOError, "embedding provider returned an empty embedding vector")
+  finally:
+    client.close()
 
 proc cosineSimilarity(a, b: seq[float]): float =
   if a.len == 0 or a.len != b.len:
@@ -99,12 +103,12 @@ proc updatePolicyWeight(tenantId, token: string, delta: float) =
     return
   discard store.exec("INSERT INTO policy_weights (tenant_id,token,weight,updates,updated_at) VALUES (?,?,?,1,?) ON CONFLICT(tenant_id,token) DO UPDATE SET weight=policy_weights.weight*0.95+excluded.weight*0.05,updates=policy_weights.updates+1,updated_at=excluded.updated_at", @[%tenantId, %key, %delta, %nowF()])
 
-proc searchSkills(tenantId, queryText: string, limit: int): seq[Row] =
+proc searchSkills(tenantId, queryText: string, limit: int): Future[seq[Row]] {.async.} =
   let rows = store.query("SELECT * FROM skills WHERE tenant_id=? AND active=1", @[%tenantId])
   if rows.len == 0:
     return @[]
   let actualLimit = max(1, limit)
-  let qEmb = textEmbedding(queryText)
+  let qEmb = await textEmbedding(queryText)
   var dense: seq[(string, float)] = @[]
   var sparse: seq[(string, float)] = @[]
   var byId = initTable[string, Row]()
@@ -117,7 +121,7 @@ proc searchSkills(tenantId, queryText: string, limit: int): seq[Row] =
     let corpus = row.getStr("name") & " " & row.getStr("domain") & " " & row.getStr("trigger_spec") & " " & row.getStr("procedure_spec") & " " & row.getStr("skill_code")
     var embedding = jsonToEmb(row.getStr("embedding_json"))
     if embedding.len != qEmb.len:
-      embedding = textEmbedding(corpus)
+      embedding = await textEmbedding(corpus)
       discard store.exec("UPDATE skills SET embedding_json=?,updated_at=? WHERE skill_id=?", @[%embToJson(embedding), %nowF(), %id])
     dense.add((id, cosineSimilarity(qEmb, embedding)))
     let overlap = intersection(qTerms, contentTerms(corpus).toHashSet()).len.float
@@ -177,17 +181,17 @@ proc learnedPolicySignals(tenantId, context: string, limit: int = 16): string =
     lines.add((if item[2] >= 0.0: "FAVOR " else: "AVOID ") & item[0] & " weight=" & formatFloat(item[2], ffDecimal, 4) & " evidence=" & $item[3])
   result = lines.join("\n")
 
-proc searchKnowledge(tenantId, queryText: string, limit: int): seq[Row] =
+proc searchKnowledge(tenantId, queryText: string, limit: int): Future[seq[Row]] {.async.} =
   let rows = store.query("SELECT * FROM knowledge_docs WHERE tenant_id=?", @[%tenantId])
   if rows.len == 0:
     return @[]
   let actualLimit = max(1, limit)
-  let qEmb = textEmbedding(queryText)
+  let qEmb = await textEmbedding(queryText)
   let qTerms = contentTerms(queryText).toHashSet()
   var scored: seq[(Row, float)] = @[]
   for row in rows:
     let corpus = row.getStr("slug") & " " & row.getStr("category") & " " & row.getStr("content")
-    let dense = cosineSimilarity(qEmb, textEmbedding(corpus))
+    let dense = cosineSimilarity(qEmb, await textEmbedding(corpus))
     let sparse = intersection(qTerms, contentTerms(corpus).toHashSet()).len.float
     scored.add((row, dense + sparse * 0.2))
   scored.sort(proc(a, b: (Row, float)): int = cmp(b[1], a[1]))
@@ -491,7 +495,26 @@ proc sanitizeKnowledgeName(s: string): string =
   if result.len > 96:
     result.setLen(96)
 
-proc ensureKnowledgeRepo(tenant: string): string =
+proc runGit(repo: string, args: seq[string]): Future[(int, string)] {.async.} =
+  var process: Process
+  try:
+    process = startProcess("git", workingDir = repo, args = args,
+      options = {poUsePath, poStdErrToStdOut})
+    while process.running():
+      await sleepAsync(10)
+    let exitCode = process.waitForExit(0)
+    let output = process.outputStream().readAll()
+    process.close()
+    return (exitCode, output)
+  except CatchableError:
+    if not process.isNil:
+      try:
+        process.close()
+      except CatchableError:
+        discard
+    raise
+
+proc ensureKnowledgeRepo(tenant: string): Future[string] {.async.} =
   let tenantId = tenant.strip()
   if tenantId.len == 0:
     raise newException(ValueError, "tenant id is required")
@@ -504,19 +527,19 @@ proc ensureKnowledgeRepo(tenant: string): string =
     raise newException(ValueError, "knowledge repository escapes configured root")
   createDir(dir)
   if not dirExists(dir / ".git"):
-    let initRes = execCmdEx("git -C " & quoteShell(dir) & " init")
-    if initRes.exitCode != 0:
-      raise newException(IOError, "git init failed: " & initRes.output)
-    let emailRes = execCmdEx("git -C " & quoteShell(dir) & " config user.email agent@runtime.local")
-    if emailRes.exitCode != 0:
-      raise newException(IOError, "git config failed: " & emailRes.output)
-    let nameRes = execCmdEx("git -C " & quoteShell(dir) & " config user.name AutonomousRuntime")
-    if nameRes.exitCode != 0:
-      raise newException(IOError, "git config failed: " & nameRes.output)
+    let initRes = await runGit(dir, @["init"])
+    if initRes[0] != 0:
+      raise newException(IOError, "git init failed: " & initRes[1])
+    let emailRes = await runGit(dir, @["config", "user.email", "agent@runtime.local"])
+    if emailRes[0] != 0:
+      raise newException(IOError, "git config failed: " & emailRes[1])
+    let nameRes = await runGit(dir, @["config", "user.name", "AutonomousRuntime"])
+    if nameRes[0] != 0:
+      raise newException(IOError, "git config failed: " & nameRes[1])
   result = dir
 
-proc commitKnowledgeDoc(tenant, slug, category, body: string): string =
-  let repo = ensureKnowledgeRepo(tenant)
+proc commitKnowledgeDoc(tenant, slug, category, body: string): Future[string] {.async.} =
+  let repo = await ensureKnowledgeRepo(tenant)
   let safeSlug = sanitizeKnowledgeName(slug) & "-" & sha1Hex(slug)[0 .. 15]
   let safeCategory = sanitizeKnowledgeName(category) & "-" & sha1Hex(category)[0 .. 15]
   let rel = safeCategory & "_" & safeSlug & ".md"
@@ -526,18 +549,18 @@ proc commitKnowledgeDoc(tenant, slug, category, body: string): string =
   if existing.len > 0 and existing[0].getStr("content_hash") == contentHash and fileExists(full):
     return existing[0].getStr("doc_id")
   atomicWrite(full, "# " & slug & "\nCategory: " & category & "\n\n" & body & "\n")
-  let addRes = execCmdEx("git -C " & quoteShell(repo) & " add -- " & quoteShell(rel))
-  if addRes.exitCode != 0:
-    raise newException(IOError, "git add failed: " & addRes.output)
-  let commitRes = execCmdEx("git -C " & quoteShell(repo) & " commit -m " & quoteShell("knowledge update: " & safeSlug))
-  if commitRes.exitCode != 0:
-    let statusRes = execCmdEx("git -C " & quoteShell(repo) & " status --porcelain -- " & quoteShell(rel))
-    if statusRes.exitCode != 0 or statusRes.output.strip().len > 0:
-      raise newException(IOError, "git commit failed: " & commitRes.output)
-  let revRes = execCmdEx("git -C " & quoteShell(repo) & " rev-parse HEAD")
-  if revRes.exitCode != 0:
-    raise newException(IOError, "git rev-parse failed: " & revRes.output)
-  let commitHash = revRes.output.strip()
+  let addRes = await runGit(repo, @["add", "--", rel])
+  if addRes[0] != 0:
+    raise newException(IOError, "git add failed: " & addRes[1])
+  let commitRes = await runGit(repo, @["commit", "-m", "knowledge update: " & safeSlug])
+  if commitRes[0] != 0:
+    let statusRes = await runGit(repo, @["status", "--porcelain", "--", rel])
+    if statusRes[0] != 0 or statusRes[1].strip().len > 0:
+      raise newException(IOError, "git commit failed: " & commitRes[1])
+  let revRes = await runGit(repo, @["rev-parse", "HEAD"])
+  if revRes[0] != 0:
+    raise newException(IOError, "git rev-parse failed: " & revRes[1])
+  let commitHash = revRes[1].strip()
   let docId = if existing.len > 0: existing[0].getStr("doc_id") else: newId("doc")
   let ts = nowF()
   discard store.exec("INSERT INTO knowledge_docs (doc_id,tenant_id,slug,category,path,content_hash,git_commit_hash,content,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(tenant_id,slug) DO UPDATE SET category=excluded.category,path=excluded.path,content_hash=excluded.content_hash,git_commit_hash=excluded.git_commit_hash,content=excluded.content,updated_at=excluded.updated_at",
