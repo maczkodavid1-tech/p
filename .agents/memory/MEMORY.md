@@ -3,3 +3,4 @@
 - [FlyMyAI image generation](flymyai-image-generation.md) — configure the host-root base URL; the client appends the versioned prediction path.
 - [Nim generated Python](nim-generated-python.md) — use single-quoted Python literals inside Nim-built scripts to avoid ambiguous doubled-quote parsing.
 - [PTY WebSocket lifecycle](pty-websocket-lifecycle.md) — serialize frame writes cooperatively and enforce protocol/output limits on the persistent client.
+- [Workflow configuration validation](workflow-config-validation.md) — validate .replit replacements through the platform workflow instead of editing the file directly.

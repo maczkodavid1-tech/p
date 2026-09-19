@@ -6,7 +6,7 @@ description: >
 
 # Built-in LLM Models
 
-The root strategic brain is Cerebras Gemma 4. It receives the user objective, persistent task state, dynamic PlanSteps graph, latest real observations, complete tool catalog, active subagent tree, and this skill. It decides the root plan, which model handles each direct step, whether work should be delegated, how wide or deep the subagent tree should become, and when results need integration or verification.
+The root strategic brain is Claude Fable 5 through VMCO. It receives the user objective, persistent task state, dynamic PlanSteps graph, latest real observations, complete tool catalog, active subagent tree, and this skill. It decides the root plan, which model handles each direct step, whether work should be delegated, how wide or deep the subagent tree should become, and when results need integration or verification.
 
 Model selection is semantic and model-driven. A word appearing in the request is evidence about the task, never a backend routing rule. The backend validates only that a model id exists and executes the decision that a model made.
 
@@ -16,7 +16,7 @@ Every configured model can run as a subagent. Every subagent receives the comple
 
 | Model role id | Runtime model | Provider | Primary strengths |
 | --- | --- | --- | --- |
-| `orchestrator` | dynamically resolved Gemma 4 model | Cerebras | Root strategy, decomposition, PlanSteps graph management, delegation, coordination, synthesis, verification, and delegated strategic subagents |
+| `orchestrator` | `claude-fable-5` | VMCO | Root strategy, decomposition, PlanSteps graph management, delegation, coordination, synthesis, verification, and delegated strategic subagents |
 | `gpt6_astra` | `openai/gpt-6-astra:flex` | Requesty | Coding, debugging, implementation, software engineering, technical investigation, shell/file/browser-driven digital execution, iterative error correction, and broad computer work |
 | `glm52` | `zai/glm-5.2` | Requesty | Detailed astrology interpretation and astrology-specific reasoning when that capability is materially useful |
 | `gemini38` | `gemini-3.8-flash` | Google Gemini Interactions API | Image, screenshot, video, visual-interface, spatial, and pixel-level multimodal analysis |
@@ -71,9 +71,9 @@ Use Requesty's OpenAI-compatible chat-completions endpoint with model `grok-4.3`
 
 Use the Gemini Interactions API with model `gemini-3.8-flash`, code execution, Google Search, and URL context tools enabled, `max_output_tokens` `65536`, and thinking level `high`. Use the Gemini prompt from `config/prompts.yaml` rather than embedding it in the Nim source.
 
-### Cerebras Gemma 4
+### Claude Fable 5
 
-Resolve the configured Gemma 4 model from `CEREBRAS_GEMMA4_MODEL` or the Cerebras model catalog. Use it for the root strategic brain and whenever another model explicitly delegates a strategic subagent to `orchestrator`.
+Use the VMCO OpenAI-compatible chat-completions endpoint with model `claude-fable-5` for the root strategic brain and whenever another model explicitly delegates a strategic subagent to `orchestrator`.
 
 ## Root route contract
 
