@@ -174,7 +174,7 @@ proc mapHttpMethod(methodName: string): HttpMethod =
 type
   ProviderKind = enum
     pkRequesty,
-    pkCerebras,
+    pkVmco,
     pkGemini,
     pkFlyMyAi
   ModelRole = enum

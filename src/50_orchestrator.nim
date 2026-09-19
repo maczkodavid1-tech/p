@@ -568,7 +568,7 @@ proc routeTask(goal: string, sigma: JsonNode, obs: JsonNode, tenantId = "", task
   ]
   var lastError = ""
   for attempt in 0 .. 2:
-    let resp = await cerebrasCall(messages, true)
+    let resp = await vmcoCall(messages, true)
     if tenantId.len > 0 and resp.totalTokens > 0 and not chargeTokens(tenantId, taskId, resp.totalTokens):
       raise newException(IOError, "token budget exhausted")
     let node = parseJsonObjectLoose(resp.content)

@@ -73,14 +73,14 @@ proc parseModelRole(s: string): ModelRole =
 proc providerName(p: ProviderKind): string =
   case p
   of pkRequesty: "requesty"
-  of pkCerebras: "cerebras"
+  of pkVmco: "vmco"
   of pkGemini: "gemini"
   of pkFlyMyAi: "flymyai"
 
 proc modelSpec(role: ModelRole): ModelSpec =
   case role
   of mrOrchestrator:
-    ModelSpec(role: role, provider: pkCerebras, model: CerebrasGemma4Model, multimodal: false, structured: true)
+    ModelSpec(role: role, provider: pkVmco, model: VmcoModel, multimodal: false, structured: true)
   of mrGpt6Astra:
     ModelSpec(role: role, provider: pkRequesty, model: Gpt6AstraModel, multimodal: true, structured: true)
   of mrGlm52:
@@ -465,41 +465,11 @@ proc requestyCall(role: ModelRole, messages: JsonNode, structured = false): Futu
     raise newException(IOError, "Requesty status " & $status & ": " & raw)
   return parseOpenAiResponse(raw, pkRequesty)
 
-proc resolveCerebrasGemma4(): Future[string] {.async.} =
-  if CerebrasGemma4Model.len > 0:
-    return CerebrasGemma4Model
-  let explicit = getEnv("CEREBRAS_GEMMA4_MODEL", "").strip()
-  if explicit.len > 0:
-    CerebrasGemma4Model = explicit
-    return explicit
-  let key = requireEnv("CEREBRAS_API_KEY")
-  let headers = newHttpHeaders({
-    "Authorization": "Bearer " & key,
-    "Accept": "application/json"
-  })
-  let (status, raw, _) = await httpRequestAsync(CerebrasBaseUrl & "/models", HttpGet, "", headers)
-  if status < 200 or status >= 300:
-    raise newException(IOError, "Cerebras models status " & $status & ": " & raw)
-  let j = parseJson(raw)
-  if not j.hasKey("data") or j["data"].kind != JArray:
-    raise newException(IOError, "Cerebras model catalog has no data array")
-  for it in j["data"].elems:
-    if it.kind != JObject:
-      continue
-    let id = it{"id"}.getStr("")
-    let hay = (id & " " & it{"name"}.getStr("") & " " & it{"description"}.getStr("")).toLowerAscii()
-    if "gemma" in hay and ("4" in hay or "four" in hay):
-      CerebrasGemma4Model = id
-      return id
-  raise newException(IOError, "Gemma 4 model is not available in the Cerebras model catalog")
-
-proc cerebrasCall(messages: JsonNode, structured = true): Future[LlmResponse] {.async.} =
-  let key = requireEnv("CEREBRAS_API_KEY")
-  let model = await resolveCerebrasGemma4()
+proc vmcoCall(messages: JsonNode, structured = true): Future[LlmResponse] {.async.} =
+  let key = requireEnv("VMCO_API_KEY")
   var body = %*{
-    "model": model,
-    "messages": messages,
-    "reasoning_effort": "high"
+    "model": VmcoModel,
+    "messages": messages
   }
   if structured:
     body["response_format"] = %*{"type": "json_object"}
@@ -508,10 +478,10 @@ proc cerebrasCall(messages: JsonNode, structured = true): Future[LlmResponse] {.
     "Content-Type": "application/json",
     "Accept": "application/json"
   })
-  let (status, raw, _) = await httpRequestAsync(CerebrasBaseUrl & "/chat/completions", HttpPost, $body, headers)
+  let (status, raw, _) = await httpRequestAsync(VmcoBaseUrl & "/chat/completions", HttpPost, $body, headers)
   if status < 200 or status >= 300:
-    raise newException(IOError, "Cerebras status " & $status & ": " & raw)
-  return parseOpenAiResponse(raw, pkCerebras)
+    raise newException(IOError, "VMCO status " & $status & ": " & raw)
+  return parseOpenAiResponse(raw, pkVmco)
 
 proc extractGeminiOutput(j: JsonNode): string =
   var parts: seq[string] = @[]
@@ -687,7 +657,7 @@ proc invokeModel(role: ModelRole, messages: JsonNode, structured = false, tenant
   var response: LlmResponse
   case role
   of mrOrchestrator:
-    response = await cerebrasCall(messages, true)
+    response = await vmcoCall(messages, true)
   of mrGemini38:
     let input = geminiInputFromMessages(messages)
     response = await geminiCall(input, geminiSystemInstructionFromMessages(messages))
@@ -710,7 +680,7 @@ proc effectiveMaxTokens(requested: int, source: string): int =
   let sourceName = source.strip().toLowerAscii()
   let providerMaximum =
     if sourceName in ["gemini", "gemini38", "gemini-3.8-flash", "models/gemini-3.8-flash"]: 65536
-    elif sourceName in ["orchestrator", "cerebras", "gemma4", "gemma-4"]: 32768
+    elif sourceName in ["orchestrator", "vmco", "claude-fable-5"]: 32768
     else: 131072
   if requested <= 0:
     return providerMaximum

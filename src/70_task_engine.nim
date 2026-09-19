@@ -150,7 +150,7 @@ proc verifyStepCompletion(h: TaskHandle, step, modelNode: JsonNode, toolRes: Too
     return (false, %*{"verified": false, "reason": "tool execution failed", "evidence": evidence})
   let systemText = promptText("step_verifier")
   let userText = "Verify whether this exact plan step is complete from concrete evidence only. Do not infer success from the specialist claiming success.\n\n" & canonical(evidence)
-  let resp = await cerebrasCall(%*[{"role": "system", "content": systemText}, {"role": "user", "content": userText}], true)
+  let resp = await vmcoCall(%*[{"role": "system", "content": systemText}, {"role": "user", "content": userText}], true)
   if resp.totalTokens > 0 and not chargeTokens(h.tenantId, h.taskId, resp.totalTokens):
     h.haltForBudget()
     return (false, %*{"verified": false, "reason": "token budget exhausted"})
@@ -517,7 +517,7 @@ proc completionCheck(h: TaskHandle): Future[(bool, string)] {.async.} =
   if runningSubAgentCount(h.taskId) > 0:
     return (false, "")
   let userText = "GOAL:\n" & goal & "\n\nEXPECTED COMPLETION CRITERIA:\n" & canonical(expectedCriteria) & "\n\nSTATE:\n" & canonical(sigma) & "\n\nLATEST OBSERVATION:\n" & canonical(obs) & "\n\nSUBAGENT TREE:\n" & canonical(subAgentTreeJson(h.taskId))
-  let resp = await cerebrasCall(%*[{"role": "system", "content": promptText("completion_evaluator")}, {"role": "user", "content": userText}], true)
+  let resp = await vmcoCall(%*[{"role": "system", "content": promptText("completion_evaluator")}, {"role": "user", "content": userText}], true)
   if resp.totalTokens > 0 and not chargeTokens(h.tenantId, h.taskId, resp.totalTokens):
     h.haltForBudget()
     return (false, "")
@@ -615,7 +615,7 @@ proc system2Think(h: TaskHandle) {.async.} =
       return
     let systemText = promptText("orchestrator_system2")
     let userText = "GOAL:\n" & goal & "\n\nSTATE:\n" & canonical(sigma) & "\n\nLATEST OBSERVATION:\n" & canonical(obs) & "\n\nSUBAGENT TREE:\n" & canonical(subAgentTreeJson(h.taskId)) & "\n\nTOOLS:\n" & canonical(toolCatalog()) & "\n\nAVAILABLE MODEL REFERENCE SKILLS:\n" & referenceSkillCatalog() & "\n\nVALID SPECIALIST MODEL ROLE IDS:\n" & configuredModelRoleNames().join(", ") & "\n\nVALID SUBAGENT MODEL ROLE IDS:\n" & configuredSubAgentModelRoleNames().join(", ")
-    let resp = await cerebrasCall(%*[{"role": "system", "content": systemText}, {"role": "user", "content": userText}], true)
+    let resp = await vmcoCall(%*[{"role": "system", "content": systemText}, {"role": "user", "content": userText}], true)
     if resp.totalTokens > 0 and not chargeTokens(h.tenantId, h.taskId, resp.totalTokens):
       h.haltForBudget()
       return
@@ -1075,7 +1075,7 @@ proc verifySubAgentResult(a: SubAgentHandle, candidate: string, modelNode: JsonN
   let context = copy(a.context)
   release(a.lock)
   let payload = %*{"agent_id": a.agentId, "goal": a.goal, "instructions": a.instructions, "context": context, "state": state, "candidate_result": candidate, "model_output": copy(modelNode)}
-  let resp = await cerebrasCall(%*[{"role": "system", "content": promptText("subagent_verifier")}, {"role": "user", "content": canonical(payload)}], true)
+  let resp = await vmcoCall(%*[{"role": "system", "content": promptText("subagent_verifier")}, {"role": "user", "content": canonical(payload)}], true)
   if resp.totalTokens > 0 and not chargeTokens(a.rootTask.tenantId, a.taskId, resp.totalTokens):
     a.rootTask.haltForBudget()
     return (false, %*{"verified": false, "reason": "token budget exhausted"})

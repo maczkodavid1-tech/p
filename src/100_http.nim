@@ -454,7 +454,7 @@ proc handleHttpRequest(req: Request) {.async, gcsafe.} =
     return
   if path == "/api/health" and req.reqMethod == HttpGet:
     let dbReady = not store.isNil and not store.handle.isNil
-    await respondJson(req, Http200, %*{"ok": dbReady, "status": (if dbReady: "ready" else: "not_ready"), "time": nowF(), "models": {"orchestrator": CerebrasGemma4Model, "gpt6_astra": Gpt6AstraModel, "glm52": Glm52Model, "gemini38": Gemini38Model, "minimax_m3": MiniMaxM3Model, "grok43": Grok43Model}})
+    await respondJson(req, Http200, %*{"ok": dbReady, "status": (if dbReady: "ready" else: "not_ready"), "time": nowF(), "models": {"orchestrator": VmcoModel, "gpt6_astra": Gpt6AstraModel, "glm52": Glm52Model, "gemini38": Gemini38Model, "minimax_m3": MiniMaxM3Model, "grok43": Grok43Model}})
     return
   let auth = authenticate(req)
   if auth.isNone:

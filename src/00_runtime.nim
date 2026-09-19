@@ -7,7 +7,7 @@
 const
   SqliteLib = when defined(windows): "sqlite3_64.dll" elif defined(macosx): "libsqlite3.dylib" else: "libsqlite3.so(|.0)"
   DefaultRequestyBaseUrl = "https://router.requesty.ai/v1"
-  DefaultCerebrasBaseUrl = "https://api.cerebras.ai/v1"
+  DefaultVmcoBaseUrl = "https://api.vmco.ai/v1"
   DefaultGeminiBaseUrl = "https://generativelanguage.googleapis.com/v1"
   DefaultInstaVmBaseUrl = "https://api.instavm.io"
   DefaultFlyMyAiBaseUrl = "https://api.flymy.ai"
@@ -16,6 +16,7 @@ const
   Gemini38Model = "models/gemini-3.8-flash"
   MiniMaxM3Model = "minimaxi/minimax-m3"
   Grok43Model = "grok-4.3"
+  VmcoModel = "claude-fable-5"
   Seedream5ProImageModel = "flymyai/bytedance-seedream-5_0_pro"
   GptImage25SunburstEditModel = "flymyai/gpt-image-2-5-sunburst_edit"
   SeedreamReferenceSlots = 14
@@ -39,13 +40,12 @@ var
   WorkspaceRoot {.threadvar.}: string
   knowledgeRoot {.threadvar.}: string
   RequestyBaseUrl {.threadvar.}: string
-  CerebrasBaseUrl {.threadvar.}: string
+  VmcoBaseUrl {.threadvar.}: string
   GeminiBaseUrl {.threadvar.}: string
   InstaVmBaseUrl {.threadvar.}: string
   FlyMyAiBaseUrl {.threadvar.}: string
   FlyMyAiAdultImageModel {.threadvar.}: string
   FlyMyAiSafeImageModel {.threadvar.}: string
-  CerebrasGemma4Model {.threadvar.}: string
   PromptConfigFile {.threadvar.}: string
   ReferenceSkillRoot {.threadvar.}: string
   PublicRoot {.threadvar.}: string

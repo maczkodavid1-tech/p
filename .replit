@@ -1,3 +1,4 @@
+[tool]
 run = "nim --version"
 modules = ["python-base-3.13", "nodejs-24"]
 
@@ -35,7 +36,6 @@ externalPort = 80
 [userenv]
 
 [userenv.shared]
-CEREBRAS_GEMMA4_MODEL = "qwen-3.8-27b"
 
 [deployment]
 deploymentTarget = "autoscale"
